@@ -737,7 +737,11 @@ class phRETS {
 		// return the big array
 		return $this_table;
 	}
-
+/**
+ * Get values for an individual type
+ * @param string $resource Class name
+ * @param string $lookupname metadata LookupName
+ */
 
 	public function GetLookupValues($resource, $lookupname) {
 		$this->reset_error_info();
