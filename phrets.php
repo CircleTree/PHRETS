@@ -739,21 +739,24 @@ class phRETS {
 	}
 /**
  * Get values for an individual type
+ * @TODO refactor this to cache the results to limit API calls for loops
+ * 	Maybe add a third param $cache = false, where the interface will allow a dev
+ * 	to specify that it should to an 'ID' => resource:* call and cache the result 
+ * 	for use in subsequent lookup value requests
  * @param string $resource Class name
  * @param string $lookupname metadata LookupName
  */
-
 	public function GetLookupValues($resource, $lookupname) {
 		$this->reset_error_info();
 
 		if (empty($resource)) {
-			die("Resource parameter is required in GetLookupValues() request.");
+			$this->fail("Resource parameter is required in GetLookupValues() request.");
 		}
 		if (empty($lookupname)) {
-			die("Lookup Name parameter is required in GetLookupValues() request.");
+			$this->fail("Lookup Name parameter is required in GetLookupValues() request.");
 		}
 		if (empty($this->capability_url['GetMetadata'])) {
-			die("GetLookupValues() called but unable to find GetMetadata location.  Failed login?\n");
+			$this->fail("GetLookupValues() called but unable to find GetMetadata location.  Failed login?\n");
 		}
 
 		// make request
