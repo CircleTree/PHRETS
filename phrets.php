@@ -1,7 +1,5 @@
 <?php
 
-class phRETS {
-
 /**
 *  PHRETS - PHP library for RETS
 *  version 1.0rc3 (release candidate 3)  please send error reports and/or feedback to troy.davisson@gmail.com
@@ -16,6 +14,8 @@ class phRETS {
 *    Low level: Framework for communicating with a RETS server.  High level functions sit on top of these
 *
 */
+class phRETS {
+
 
 	public $err;
 	public $capability_url = array();
@@ -67,16 +67,17 @@ class phRETS {
 	private $offset_support = false;
 	private $override_offset_protection = false;
 
-
-
 	public function phRETS() { }
-
 
 	public function GetLastServerResponse() {
 		return $this->last_server_response;
 	}
 
-
+	/**
+	 * Tests internet connectivity
+	 * @param $echo bool optionally echo out error messages, used for verbose debugging
+	 * @return bool true on success, false on failure
+	 */
 	public function FirewallTest() {
 		$google = $this->FirewallTestConn("google.com", 80);
 		$crt80 = $this->FirewallTestConn("demo.crt.realtors.org", 80);
@@ -85,38 +86,44 @@ class phRETS {
 		$flexmls6103 = $this->FirewallTestConn("retsgw.flexmls.com", 6103);
 
 		if (!$google && !$crt80 && !$crt6103 && !$flexmls80 && !$flexmls6103) {
-			echo "Firewall Result: All tests failed.  Possible causes:";
-			echo "<ol>";
-			echo "<li>Firewall is blocking your outbound connections</li>";
-			echo "<li>You aren't connected to the internet</li>";
-			echo "</ol>";
+			$msg .= "Firewall Result: All tests failed.  Possible causes:";
+			$msg .= "<ol>";
+			$msg .= "<li>Firewall is blocking your outbound connections</li>";
+			$msg .= "<li>You aren't connected to the internet</li>";
+			$msg .= "</ol>";
+			$this->fail($msg);
 			return false;
 		}
 
 		if (!$crt6103 && !$flexmls6103) {
-			echo "Firewall Result: All port 6103 tests failed.  ";
-			echo "Likely cause: Firewall is blocking your outbound connections on port 6103.";
+			$msg .= "Firewall Result: All port 6103 tests failed.  ";
+			$msg .= "Likely cause: Firewall is blocking your outbound connections on port 6103.";
+			$this->fail($msg);
 			return false;
 		}
 
 		if ($google && $crt6103 && $crt80 && $flexmls6103 && $flexmls80) {
-			echo "Firewall Result: All tests passed.";
+			$msg .= "Firewall Result: All tests passed.";
+			$this->warn($msg);
 			return true;
 		}
 
 		if (($crt6103 && !$flexmls6103) || (!$crt6103 && $flexmls6103)) {
-			echo "Firewall Result: At least one port 6103 test passed.  ";
-			echo "Likely cause: One of the test servers might be down but connections on port 80 and port 6103 should work.";
+			$msg .= "Firewall Result: At least one port 6103 test passed.  ";
+			$msg .= "Likely cause: One of the test servers might be down but connections on port 80 and port 6103 should work.";
+			$this->warn($msg);
 			return true;
 		}
 
 		if (!$google || !$crt80 || !$flexmls80) {
-			echo "Firewall Result: At least one port 80 test failed.  ";
-			echo "Likely cause: One of the test servers might be down.";
+			$msg .= "Firewall Result: At least one port 80 test failed.  ";
+			$msg .= "Likely cause: One of the test servers might be down.";
+			$this->warn($msg);
 			return true;
 		}
 
-		echo "Firewall Results: Unable to guess the issue.  See individual test results above.";
+		$msg .= "Firewall Test Failure: Unable to guess the issue.";
+		$this->fail($msg);
 		return false;
 
 	}
@@ -480,12 +487,17 @@ class phRETS {
 
 	}
 
-
+/**
+ * @param string $resource generic resource to query (user,property, etc.)
+ * @param string $class class id to query
+ * @param string $query actual query string
+ * @param array $optional_params array of RETS 
+ */
 	public function SearchQuery($resource, $class, $query = "", $optional_params = array()) {
 		$this->reset_error_info();
 
 		if (empty($resource)) {
-			die("Resource parameter is required in SearchQuery() request.");
+			$this->fail('Resource parameter is required');
 		}
 		if (empty($class)) {
 			die("Class parameter is required in SearchQuery() request.");
@@ -801,7 +813,11 @@ class phRETS {
 		return $this_table;
 	}
 
-
+/**
+ * Gets all resources
+ * @param int $id UNKNOWN
+ * @return array  
+ */
 	public function GetMetadataResources($id = 0) {
 		$this->reset_error_info();
 
@@ -1194,9 +1210,11 @@ class phRETS {
 		return false;
 	}
 
-
+	/**
+	 * read through capability_urls read during the Login and return
+	 * @return array $transactions
+	 */
 	public function GetAllTransactions() {
-		// read through capability_urls read during the Login and return
 		$transactions = array();
 		if (is_array($this->capability_url)) {
 			foreach ($this->capability_url as $key => $value) {
@@ -1231,7 +1249,10 @@ class phRETS {
 		return $request_url;
 	}
 
-
+	/**
+	 * Gets server info
+	 * @return array $info
+	 */
 	public function GetServerInformation() {
 		$this->reset_error_info();
 
@@ -1330,19 +1351,33 @@ class phRETS {
 		return true;
 
 	}
-
+	/**
+	 * Private utility to handle critical errors
+	 **/
+	private function fail($msg) {
+		$msg = 'Error '.$msg.' In:'.PHP_EOL;
+		$debug = debug_backtrace();
+		$msg .= $debug[1]['file'].'::'.$debug[1]['line'];
+		die($msg);
+	}
+	/**
+	 * Priate utility to handle warnings
+	 **/
+	private function warn ($msg) {
+		echo $msg;
+	}
 
 	public function Connect($login_url, $username, $password, $ua_pwd = "") {
 		$this->reset_error_info();
 
 		if (empty($login_url)) {
-			die("PHRETS: Login URL missing from Connect()");
+			$this->fail("Login URL missing from Connect()");
 		}
 		if (empty($username)) {
-			die("PHRETS: Username missing from Connect()");
+			$this->fail("Username missing from Connect()");
 		}
 		if (empty($password)) {
-			die("PHRETS: Password missing from Connect()");
+			$this->fail('No password supplied');
 		}
 		if (empty($this->static_headers['RETS-Version'])) {
 			$this->AddHeader("RETS-Version", "RETS/1.5");
