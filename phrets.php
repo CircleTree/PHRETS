@@ -75,7 +75,6 @@ class phRETS {
 
 	/**
 	 * Tests internet connectivity
-	 * @param $echo bool optionally echo out error messages, used for verbose debugging
 	 * @return bool true on success, false on failure
 	 */
 	public function FirewallTest() {
@@ -86,7 +85,7 @@ class phRETS {
 		$flexmls6103 = $this->FirewallTestConn("retsgw.flexmls.com", 6103);
 
 		if (!$google && !$crt80 && !$crt6103 && !$flexmls80 && !$flexmls6103) {
-			$msg .= "Firewall Result: All tests failed.  Possible causes:";
+			$msg = "Firewall Result: All tests failed.  Possible causes:";
 			$msg .= "<ol>";
 			$msg .= "<li>Firewall is blocking your outbound connections</li>";
 			$msg .= "<li>You aren't connected to the internet</li>";
@@ -96,33 +95,33 @@ class phRETS {
 		}
 
 		if (!$crt6103 && !$flexmls6103) {
-			$msg .= "Firewall Result: All port 6103 tests failed.  ";
+			$msg = "Firewall Result: All port 6103 tests failed.  ";
 			$msg .= "Likely cause: Firewall is blocking your outbound connections on port 6103.";
 			$this->fail($msg);
 			return false;
 		}
 
 		if ($google && $crt6103 && $crt80 && $flexmls6103 && $flexmls80) {
-			$msg .= "Firewall Result: All tests passed.";
+			$msg = "Firewall Result: All tests passed.";
 			$this->warn($msg);
 			return true;
 		}
 
 		if (($crt6103 && !$flexmls6103) || (!$crt6103 && $flexmls6103)) {
-			$msg .= "Firewall Result: At least one port 6103 test passed.  ";
+			$msg = "Firewall Result: At least one port 6103 test passed.  ";
 			$msg .= "Likely cause: One of the test servers might be down but connections on port 80 and port 6103 should work.";
 			$this->warn($msg);
 			return true;
 		}
 
 		if (!$google || !$crt80 || !$flexmls80) {
-			$msg .= "Firewall Result: At least one port 80 test failed.  ";
+			$msg = "Firewall Result: At least one port 80 test failed.  ";
 			$msg .= "Likely cause: One of the test servers might be down.";
 			$this->warn($msg);
 			return true;
 		}
 
-		$msg .= "Firewall Test Failure: Unable to guess the issue.";
+		$msg = "Firewall Test Failure: Unable to guess the issue.";
 		$this->fail($msg);
 		return false;
 
@@ -133,12 +132,12 @@ class phRETS {
 		$fp = @fsockopen($hostname, $port, $errno, $errstr, 5);
 
 		if (!$fp) {
-			echo "Firewall Test: {$hostname}:{$port} FAILED<br>\n";
+			$this->warn("Firewall Test: {$hostname}:{$port} FAILED");
 			return false;
 		}
 		else {
 			@fclose($fp);
-			echo "Firewall Test: {$hostname}:{$port} GOOD<br>\n";
+			$this->warn("Firewall Test: {$hostname}:{$port} GOOD");
 			return true;
 		}
 
