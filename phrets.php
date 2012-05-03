@@ -491,9 +491,12 @@ class phRETS {
 	 * @param array $query key value pairs to search
 	 * @return string $query_string DMQL formatted query
 	 */
-	public function prepareQuery(array $query) {
-		$query_string = '('.implode('),(', $query);
-		return rtrim($query_string, ',(');
+	public function PrepareQuery(array $query) {
+		$query_string = "";		
+		foreach ($query as $id=>$val) {
+			$query_string .= "($id=$val),";
+		}		
+		return rtrim($query_string, ',');
 	}
 
 	/**
@@ -660,7 +663,7 @@ class phRETS {
 	
 	/**
 	 * Shorthand for SearchQuery
-	 * @see phRETS->SearchQuery
+	 * @see phRETS::SearchQuery()
 	 */
 
 	public function Search($resource, $class, $query = "", $optional_params = array()) {
