@@ -485,13 +485,23 @@ class phRETS {
 		return $this_row;
 
 	}
+	
+	/**
+	 * 
+	 * @param array $query key value pairs to search
+	 * @return string $query_string DMQL formatted query
+	 */
+	public function prepareQuery(array $query) {
+		$query_string = '('.implode('),(', $query);
+		return rtrim($query_string, ',(');
+	}
 
-/**
- * @param string $resource generic resource to query (user,property, etc.)
- * @param string $class class id to query
- * @param string $query actual query string
- * @param array $optional_params array of RETS 
- */
+	/**
+	 * @param string $resource RETS resource (Property,Agent, etc.)
+	 * @param string $class RETS class id to query
+	 * @param string $query DMQL query string
+	 * @param array $optional_params array of RETS 
+	 */
 	public function SearchQuery($resource, $class, $query = "", $optional_params = array()) {
 		$this->reset_error_info();
 
@@ -647,7 +657,11 @@ class phRETS {
 
 		return $this->int_result_pointer;
 	}
-
+	
+	/**
+	 * Shorthand for SearchQuery
+	 * @see phRETS->SearchQuery
+	 */
 
 	public function Search($resource, $class, $query = "", $optional_params = array()) {
 		$data_table = array();
@@ -738,7 +752,7 @@ class phRETS {
 		return $this_table;
 	}
 /**
- * Get values for an individual type
+ * Get values for an individual type (WARNING - does an API call for each LookupName)
  * @TODO refactor this to cache the results to limit API calls for loops
  * 	Maybe add a third param $cache = false, where the interface will allow a dev
  * 	to specify that it should to an 'ID' => resource:* call and cache the result 
@@ -1328,7 +1342,7 @@ class phRETS {
 	}
 
 
-	public function Disconnect() {
+	public function __destruct () {
 		$this->reset_error_info();
 
 		if (empty($this->capability_url['Logout'])) {
