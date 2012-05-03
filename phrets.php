@@ -814,7 +814,7 @@ class phRETS {
 
 /**
  * Gets all resources
- * @param int $id UNKNOWN
+ * @param string $id Optional resource type string (Property, User, Office, Etc.). Omit for all.
  * @return array  
  */
 	public function GetMetadataResources($id = 0) {
