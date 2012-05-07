@@ -143,8 +143,16 @@ class phRETS {
 
 	}
 
-
-	public function GetObject($resource, $type, $id, $photo_number = '*', $location = 0) {
+/**
+ * Get RETS Objects (typically photos)
+ * @param string $resource RETS Resource for requested object
+ * @param string $type RETS GetObject type. See GetMetadataObjects for available types.
+ * @param mixed $id ID of Object. This is the value of the KeyName field within the Resource for your record (typically the MLS#). This is NOT the full ID as described in the RETS specification.
+ * @param int $photo_number Optional. Requested object ID. Typically represents the photo order. Possible Values: 0, 1, 2, 3, etc., or * (asterisk) to request all objects. Default is *
+ * @param bool $location Optional. Used to return URLs rather than image data. Not always supported by the server. True gets URLs, False gets binary image data. Default is False.
+ * @return boolean|multitype:boolean multitype:string boolean unknown
+ */
+	public function GetObject($resource, $type, $id, $photo_number = '*', $location = FALSE) {
 		$this->reset_error_info();
 		$return_photos = array();
 
@@ -207,12 +215,13 @@ class phRETS {
 		}
 
 		// make request
+		$location_int = $location ? 1 : 0; 
 		$result = $this->RETSRequest($this->capability_url['GetObject'],
 						array(
 								'Resource' => $resource,
 								'Type' => $type,
 								'ID' => $send_id,
-								'Location' => $location
+								'Location' => $location_int
 								)
 						);
 
@@ -1345,7 +1354,7 @@ class phRETS {
 	}
 
 
-	public function __destruct () {
+	public function Disconnect () {
 		$this->reset_error_info();
 
 		if (empty($this->capability_url['Logout'])) {
@@ -1375,18 +1384,20 @@ class phRETS {
 
 	}
 	/**
-	 * Private utility to handle critical errors
+	 * utility to handle critical errors
+	 * @access protected 
 	 **/
-	private function fail($msg) {
+	protected function fail($msg) {
 		$msg = 'Error '.$msg.' In:'.PHP_EOL;
 		$debug = debug_backtrace();
 		$msg .= $debug[1]['file'].'::'.$debug[1]['line'];
 		die($msg);
 	}
 	/**
-	 * Priate utility to handle warnings
+	 * utility to handle warnings
+	 * @access protected
 	 **/
-	private function warn ($msg) {
+	protected function warn ($msg) {
 		echo $msg;
 	}
 
