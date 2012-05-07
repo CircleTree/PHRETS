@@ -154,84 +154,80 @@ class phRETS {
 		// make request to Login transaction
 		$result =  $this->RETSRequest($this->capability_url['Login']);
 		if (!$result) {
-		return false;
-	}
-	
-	list($headers,$body) = $result;
-	
-	// parse body response
-	$xml = $this->ParseXMLResponse($body);
-	if (!$xml) {
-	return false;
-	}
-	
-	// log replycode and replytext for reference later
-	$this->last_request['ReplyCode'] = "{$xml['ReplyCode']}";
-	$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
-	
-	// chop up login response
-	// if multiple parts of the login response aren't found splitting on \r\n, redo using just \n
-	$login_response = array();
-	
-	if ($this->server_version == "RETS/1.0") {
-	if (isset($xml)) {
-	$login_response = explode("\r\n", $xml);
-	if (empty($login_response[3])) {
-	$login_response = explode("\n", $xml);
-	}
-	}
-	}
-	else {
-		if (isset($xml->{'RETS-RESPONSE'})) {
-		$login_response = explode("\r\n", $xml->{'RETS-RESPONSE'});
-		if (empty($login_response[3])) {
-		$login_response = explode("\n", $xml->{'RETS-RESPONSE'});
+			return false;
 		}
-	}
-	}
 	
-	// parse login response.  grab all capability URLs known and ones that begin with X-
-	// otherwise, it's a piece of server information to save for reference
-	foreach ($login_response as $line) {
-	$name = null;
-	$value = null;
-	
-	if (strpos($line, '=') !== false) {
-	@list($name,$value) = explode("=", $line, 2);
-	}
-	
-	$name = trim($name);
-	$value = trim($value);
-	if (!empty($name) && !empty($value)) {
-	if (isset($this->allowed_capabilities[$name]) || preg_match('/^X\-/', $name) == true) {
-	$this->capability_url[$name] = $value;
-	}
-	else {
-	$this->server_information[$name] = $value;
-	}
-	}
-	}
-	
-	// if 'Action' capability URL is provided, we MUST request it following the successful Login
-	if (isset($this->capability_url['Action']) && !empty($this->capability_url['Action'])) {
-	$result = $this->RETSRequest($this->capability_url['Action']);
-	if (!$result) {
-	return false;
-	}
-	list($headers,$body) = $result;
-	}
-	
-	if ($this->compression_enabled == true) {
-	curl_setopt($this->ch, CURLOPT_ENCODING, "gzip");
-	}
-	
-	if ($this->last_request['ReplyCode'] == 0) {
-	return true;
-	}
-	else {
-	$this->set_error_info("rets", $this->last_request['ReplyCode'], $this->last_request['ReplyText']);
-	return false;
-	}
+		list($headers,$body) = $result;
+		
+		// parse body response
+		$xml = $this->ParseXMLResponse($body);
+		if (!$xml) {
+		return false;
+		}
+		
+		// log replycode and replytext for reference later
+		$this->last_request['ReplyCode'] = "{$xml['ReplyCode']}";
+		$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
+		
+		// chop up login response
+		// if multiple parts of the login response aren't found splitting on \r\n, redo using just \n
+		$login_response = array();
+		
+		if ($this->server_version == "RETS/1.0") {
+			if (isset($xml)) {
+			$login_response = explode("\r\n", $xml);
+				if (empty($login_response[3])) {
+					$login_response = explode("\n", $xml);
+				}
+			}
+		} else {
+			if (isset($xml->{'RETS-RESPONSE'})) {
+				$login_response = explode("\r\n", $xml->{'RETS-RESPONSE'});
+				if (empty($login_response[3])) {
+				$login_response = explode("\n", $xml->{'RETS-RESPONSE'});
+				}
+			}
+		}
+		
+		// parse login response.  grab all capability URLs known and ones that begin with X-
+		// otherwise, it's a piece of server information to save for reference
+		foreach ($login_response as $line) {
+			$name = $value = null;
+		
+			if (strpos($line, '=') !== false) {
+				@list($name,$value) = explode("=", $line, 2);
+			}
+			
+			$name = trim($name);
+			$value = trim($value);
+			if (!empty($name) && !empty($value)) {
+				if (isset($this->allowed_capabilities[$name]) || preg_match('/^X\-/', $name) == true) {
+					$this->capability_url[$name] = $value;
+				} else {
+					$this->server_information[$name] = $value;
+				}
+			}
+		}
+		
+		// if 'Action' capability URL is provided, we MUST request it following the successful Login
+		if (isset($this->capability_url['Action']) && !empty($this->capability_url['Action'])) {
+			$result = $this->RETSRequest($this->capability_url['Action']);
+			if (!$result) {
+				return false;
+			}
+			list($headers,$body) = $result;
+		}
+		
+		if ($this->compression_enabled == true) {
+			curl_setopt($this->ch, CURLOPT_ENCODING, "gzip");
+		}
+		
+		if ($this->last_request['ReplyCode'] == 0) {
+			return true;
+		} else {
+			$this->set_error_info("rets", $this->last_request['ReplyCode'], $this->last_request['ReplyText']);
+			return false;
+		}
 	
 	}
 	
