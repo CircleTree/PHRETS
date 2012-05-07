@@ -2,12 +2,10 @@
 
 /**
 *  PHRETS - PHP library for RETS
-*  version 1.0rc3 (release candidate 3)  please send error reports and/or feedback to troy.davisson@gmail.com
-*  http://troda.com/projects/phrets/
-*  Copyright (C) 2007-2011 Troy Davisson
-*
-*  All rights reserved.
-*  Permission is hereby granted, free of charge, to use, copy or modify this software.  Use at your own risk.
+*  Copyright 2012 Circle Tree, LLC.
+*  Based on:
+*	  	http://troda.com/projects/phrets/
+*  		Copyright (C) 2007-2011 Troy Davisson
 *
 *  This library is divided into 2 sections: high level and low level
 *    High level: Helpful functions that take much of the burden out of processing RETS data
@@ -851,15 +849,19 @@ class phRETS {
 		return $data_table;
 	}
 
-
+/**
+ * Gets all of the lookup values for the selected resource
+ * @param string $resource Resource string (Property, User, Etc.)
+ * @return array $values 
+ */
 	public function GetAllLookupValues($resource) {
 		$this->reset_error_info();
 
 		if (empty($resource)) {
-			die("Resource parameter is required in GetAllLookupValues() request.");
+			$this->fail("Resource parameter is required in GetAllLookupValues() request.");
 		}
 		if (empty($this->capability_url['GetMetadata'])) {
-			die("GetAllLookupValues() called but unable to find GetMetadata location.  Failed login?\n");
+			$this->fail("GetAllLookupValues() called but unable to find GetMetadata location.  Failed login?");
 		}
 
 		// make request
@@ -898,8 +900,7 @@ class phRETS {
 					$lookup_xml_array = array();
 					if (($this->server_version == "RETS/1.7.2") || ($this->server_version == "RETS/1.8")) {
 						$lookup_xml_array = $key->LookupType;
-					}
-					else {
+					} else {
 						$lookup_xml_array = $key->Lookup;
 					}
 
@@ -1094,7 +1095,12 @@ class phRETS {
 		return $this->GetMetadataResources($id);
 	}
 
-
+	/**
+	 * 
+	 * @param string $resource Resource (Property, User, Etc.)
+	 * @param string $class Class ID (by ClassName returned from 
+	 * @see phRETS::GetMetadataClasses();
+	 */
 	public function GetMetadataTable($resource, $class) {
 		$this->reset_error_info();
 
@@ -1252,15 +1258,18 @@ class phRETS {
 		return $return_data;
 	}
 
-
+	/**
+	 * Get metadata classes
+	 * @param string $id Resource name (Property, User, Etc.)
+	 */
 	public function GetMetadataClasses($id) {
 		$this->reset_error_info();
 
 		if (empty($id)) {
-			die("ID parameter is required in GetMetadataClasses() request.");
+			$this->fail("ID parameter is required in GetMetadataClasses() request.");
 		}
 		if (empty($this->capability_url['GetMetadata'])) {
-			die("GetMetadataClasses() called but unable to find GetMetadata location.  Failed login?\n");
+			$this->fail("GetMetadataClasses() called but unable to find GetMetadata location.  Failed login?\n");
 		}
 
 		// request basic metadata information
@@ -1397,7 +1406,11 @@ class phRETS {
 		return $this->server_version;
 	}
 
-
+	/**
+	 *  Check RETS authentication support
+	 * @param string $type authentication type. currently supports basic & digest
+	 * @return boolean true when supported, false for no support
+	 */
 	public function CheckAuthSupport($type = "") {
 		if ($type == "basic") {
 			return $this->auth_support_basic;
@@ -1436,8 +1449,7 @@ class phRETS {
 		if (empty($parse_results)) {
 			// login transaction gave a relative path for this action
 			$request_url = $this->server_protocol.'://'.$this->server_hostname.':'.$this->server_port.''.$this->capability_url['Login'];
-		}
-		else {
+		} else {
 			// login transaction gave an absolute path for this action
 			$request_url = $this->capability_url['Login'];
 		}
@@ -1456,7 +1468,7 @@ class phRETS {
 		$this->reset_error_info();
 
 		if (empty($this->capability_url['GetMetadata'])) {
-			die("GetServerInformation() called but unable to find GetMetadata location.  Failed login?\n");
+			$this->fail("GetServerInformation() called but unable to find GetMetadata location.  Failed login?\n");
 		}
 
 		// request server information
@@ -1520,12 +1532,14 @@ class phRETS {
 				);
 	}
 
-
+	/**
+	 * Logs out current RETS Session
+	 */
 	public function Disconnect () {
 		$this->reset_error_info();
 
 		if (empty($this->capability_url['Logout'])) {
-			die("Disconnect() called but unable to find Logout location.  Failed login?\n");
+			$this->fail("Disconnect() called but unable to find Logout location.  Failed login?\n");
 		}
 
 		// make request
@@ -1533,7 +1547,6 @@ class phRETS {
 		if (!$result) {
 			return false;
 		}
-		list($headers,$body) = $result;
 
 		// close cURL connection
 		curl_close($this->ch);
@@ -1621,17 +1634,14 @@ class phRETS {
 	 * @return array array($this->last_response_headers_raw, $response_body);
 	 */
 	public function RETSRequest($action, $parameters = "") {
+		
+		//Reset per-request class variables
 		$this->reset_error_info();
-
-		$this->err = "";
 		$this->last_response_headers = array();
-		$this->last_response_headers_raw = "";
-		$this->last_remembered_header = "";
-
-		// exposed raw RETS request function.  used internally and externally
+		$this->err = $this->last_response_headers_raw =	$this->last_remembered_header = "";
 
 		if (empty($action)) {
-			$this->fail("RETSRequest called but Action passed has no value.  Failed login?\n");
+			$this->fail("RETSRequest called but Action passed has no value.  Failed login?");
 		}
 
 		$parse_results = parse_url($action, PHP_URL_HOST);
@@ -1748,22 +1758,22 @@ class phRETS {
 			// new header
 			$this->last_response_headers[$header] = $value;
 			$last_remembered_header = $header;
-		}
-		elseif (!empty( $trimmed_call_string )) {
+		} elseif (!empty( $trimmed_call_string )) {
 			// continuation of last header.  append to previous
 			$this->last_response_headers[$this->last_remembered_header] .= $trimmed_call_string;
-		}
-		else { }
+		} else { }
 
 		return strlen($call_string);
 	}
 
-
+	/**
+	 * Gets the current error
+	 * @return mixed false on no error, array error message if there is an error
+	 */
 	public function Error() {
 		if (isset($this->error_info['type']) && !empty($this->error_info['type'])) {
 			return $this->error_info;
-		}
-		else {
+		} else {
 			return false;
 		}
 	}
@@ -1831,7 +1841,16 @@ class phRETS {
 		}
 	}
 
-
+	/**
+	 * Public interface for setting class variables
+	 * @param string $name name of setting. Values include:
+	 * 	cookie_file, debug_file, debug_mode, compression_enabled, 
+	 *	force_ua_authentication, disable_follow_location,force_basic_authentication,
+	 *	use_interealty_ua_auth, catch_last_response, disable_encoding_fix, offset_support
+	 *	override_offset_protection
+	 * @param string $value
+	 * @return boolean true on success, false on failure
+	 */
 	public function SetParam($name, $value) {
 		switch ($name) {
 			case "cookie_file":
