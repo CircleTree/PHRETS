@@ -1574,37 +1574,44 @@ class phRETS {
 		return $this->last_request;
 	}
 
-
+	/**
+	 * add static header for cURL requests
+	 * @param string $name header key
+	 * @param string $value raw HTTP header
+	 */
 	public function AddHeader($name, $value) {
-		// add static header for cURL requests
 		$this->static_headers[$name] = $value;
 		return true;
 	}
 
-
+	/**
+	 * delete static header from cURL requests 
+	 * @param string $name header key to delete
+	 */
 	public function DeleteHeader($name) {
-		// delete static header from cURL requests
 		unset($this->static_headers[$name]);
 		return true;
 	}
 
-
+	/**
+	 * Parse the XML response
+	 * @param string $data raw XML data
+	 * @return object SimpleXMLElement 
+	 */
 	public function ParseXMLResponse($data = "") {
 		$this->reset_error_info();
-
-		if (!empty($data)) {
-			// parse XML function.  ability to replace SimpleXML with something later fairly easily
-			$xml = @simplexml_load_string($data);
-			if (!is_object($xml)) {
-				$this->set_error_info("xml", -1, "XML parsing error: {$data}");
-				$this->err = "XML Parsing error: {$data}";
-				return false;
-			}
-			return $xml;
-		} else {
-			$this->set_error_info("xml", -1, "XML parsing error.  No data to parse");
+		if (empty( $data ) ) {
+			$this->fail('No XML Data to Parse');
+		}
+		// parse XML function.  
+		// ability to replace SimpleXML with something later fairly easily
+		$xml = @simplexml_load_string($data);
+		if (!is_object($xml)) {
+			$this->set_error_info("xml", -1, "XML parsing error: {$data}");
+			$this->err = "XML Parsing error: {$data}";
 			return false;
 		}
+		return $xml;
 	}
 
 	/**
