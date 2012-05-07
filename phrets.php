@@ -48,6 +48,7 @@ class phRETS {
 	private $auth_support_basic = false;
 	private $auth_support_digest = false;
 	private $last_response_headers = array();
+	private $last_response_body = "";
 	private $last_response_headers_raw = "";
 	private $last_remembered_header = "";
 	private $compression_enabled = false;
@@ -1082,7 +1083,10 @@ class phRETS {
 		return $this_resource;
 	}
 
-
+	/**
+	 * @see phRETS::GetMetadataResources($id);
+	 * @param unknown_type $id
+	 */
 	public function GetMetadataInfo($id = 0) {
 		if (empty($this->capability_url['GetMetadata'])) {
 			die("GetMetadataInfo() called but unable to find GetMetadata location.  Failed login?\n");
@@ -1597,14 +1601,18 @@ class phRETS {
 				return false;
 			}
 			return $xml;
-		}
-		else {
+		} else {
 			$this->set_error_info("xml", -1, "XML parsing error.  No data to parse");
 			return false;
 		}
 	}
 
-
+	/**
+	 * Low Level RETS transaction implementation
+	 * @param string $action use the public phRETS->capability_url array for the URL
+	 * @param array $parameters RETS transaction
+	 * @return array array($this->last_response_headers_raw, $response_body);
+	 */
 	public function RETSRequest($action, $parameters = "") {
 		$this->reset_error_info();
 
@@ -1616,7 +1624,7 @@ class phRETS {
 		// exposed raw RETS request function.  used internally and externally
 
 		if (empty($action)) {
-			die("RETSRequest called but Action passed has no value.  Failed login?\n");
+			$this->fail("RETSRequest called but Action passed has no value.  Failed login?\n");
 		}
 
 		$parse_results = parse_url($action, PHP_URL_HOST);
@@ -1673,6 +1681,9 @@ class phRETS {
 		if ($this->catch_last_response == true) {
 			$this->last_server_response = $this->last_response_headers_raw . $response_body;
 		}
+
+		//Set this for future use
+		$this->last_response_body = $response_body;
 
 		if (isset($this->last_response_headers['WWW-Authenticate'])) {
 			if (strpos($this->last_response_headers['WWW-Authenticate'], 'Basic') !== false) {
