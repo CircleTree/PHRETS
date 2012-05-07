@@ -12,6 +12,8 @@
 *    Low level: Framework for communicating with a RETS server.  High level functions sit on top of these
 *
 */
+if (! class_exists("phRETS")) :
+
 class phRETS {
 
 
@@ -1899,3 +1901,4 @@ class phRETS {
 
 }
 
+endif;
