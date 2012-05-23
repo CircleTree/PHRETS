@@ -589,16 +589,23 @@ class phRETS {
 		return $this->search_data[$pointer_id]['maxrows_reached'];
 	}
 
-
-	public function TotalRecordsFound($pointer_id = "") {
+	/**
+	 * gets the total number of records returned by the last search
+	 * @param unknown_type $pointer_id
+	 */
+	public function getTotalRecordsFound($pointer_id = "") {
 		if (empty($pointer_id)) {
 			$pointer_id = $this->int_result_pointer;
 		}
 		return $this->search_data[$pointer_id]['total_records_found'];
 	}
 
-
-	public function NumRows($pointer_id = "") {
+	/**
+	 * gets the number of results returned by the last search
+	 * @param int $pointer_id 
+	 * 
+	 */
+	public function getNumRows($pointer_id = "") {
 		if (empty($pointer_id)) {
 			$pointer_id = $this->int_result_pointer;
 		}
@@ -685,10 +692,10 @@ class phRETS {
 			$this->fail('Resource parameter is required');
 		}
 		if (empty($class)) {
-			die("Class parameter is required in SearchQuery() request.");
+			$this->fail("Class parameter is required in SearchQuery() request.");
 		}
 		if (empty($this->capability_url['Search'])) {
-			die("SearchQuery() called but unable to find Search location.  Failed login?\n");
+			$this->fail("SearchQuery() called but unable to find Search location.  Failed login?");
 		}
 
 		$this->int_result_pointer++;
