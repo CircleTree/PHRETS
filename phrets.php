@@ -29,6 +29,7 @@ class phRETS {
 	private $server_information = array();
 	private $cookie_file = "";
 	private $debug_file = "rets_debug.txt";
+	private $debug_file_handle = "rets_debug.txt";
 	private $debug_mode;
 	private $allowed_capabilities = array(
 			"Action" => 1,
@@ -121,37 +122,37 @@ class phRETS {
 			return false;
 		}
 	
-		// start cURL magic
 		$this->ch = curl_init();
-		curl_setopt($this->ch, CURLOPT_HEADERFUNCTION, array(&$this, 'read_custom_curl_headers'));
+		$curl_options = array(
+				CURLOPT_SSL_VERIFYPEER => false,
+				CURLOPT_HEADER => false,
+				CURLOPT_TIMEOUT => 0,
+				CURLOPT_COOKIEFILE => $this->cookie_file,
+				CURLOPT_RETURNTRANSFER => true,
+				CURLOPT_USERPWD => $this->username.":".$this->password,
+				CURLOPT_HEADERFUNCTION => array( &$this, 'read_custom_curl_headers'),
+			);
+		if ($this->disable_follow_location != true)
+			array_push($curl_options, array(CURLOPT_FOLLOWLOCATION => 1));
+		if ($this->force_basic_authentication == true)
+			array_push($curl_options, array(CURLOPT_HTTPAUTH => CURLAUTH_BASIC));
+		else
+			array_push($curl_options, array(CURLOPT_HTTPAUTH => CURLAUTH_DIGEST|CURLAUTH_BASIC));
+		
 		if ($this->debug_mode == true) {
-			// open file handler to be used by cURL debug log
-			$this->debug_log = @fopen($this->debug_file, 'a');
-	
-			if ($this->debug_log) {
+			$this->debug_file_handle = @fopen($this->debug_file, 'a');
+			if ($this->debug_file_handle)
+			{
 				curl_setopt($this->ch, CURLOPT_VERBOSE, 1);
-				curl_setopt($this->ch, CURLOPT_STDERR, $this->debug_log);
+				array_push($curl_options, array(CURLOPT_VERBOSE => true ));
+				array_push($curl_options, array(CURLOPT_STDERR => $this->debug_file ));
 			}
-			else {
+			else
+			{
 				echo "Unable to save debug log to {$this->debug_file}\n";
 			}
 		}
-		curl_setopt($this->ch, CURLOPT_HEADER, false);
-		if ($this->force_basic_authentication == true) {
-		curl_setopt($this->ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
-		}
-		else {
-		curl_setopt($this->ch, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST|CURLAUTH_BASIC);
-		}
-		if ($this->disable_follow_location != true) {
-		curl_setopt($this->ch, CURLOPT_FOLLOWLOCATION, 1);
-		}
-		curl_setopt($this->ch, CURLOPT_USERPWD, $this->username.":".$this->password);
-		curl_setopt($this->ch, CURLOPT_RETURNTRANSFER, true);
-		curl_setopt($this->ch, CURLOPT_COOKIEFILE, $this->cookie_file);
-		curl_setopt($this->ch, CURLOPT_TIMEOUT, 0);
-		curl_setopt($this->ch, CURLOPT_SSL_VERIFYPEER, false);
-	
+		curl_setopt_array($this->ch, $curl_options);
 		// make request to Login transaction
 		$result =  $this->RETSRequest($this->capability_url['Login']);
 		if (!$result) {
@@ -163,7 +164,7 @@ class phRETS {
 		// parse body response
 		$xml = $this->ParseXMLResponse($body);
 		if (!$xml) {
-		return false;
+			return false;
 		}
 		
 		// log replycode and replytext for reference later
