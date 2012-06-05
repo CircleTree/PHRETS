@@ -321,16 +321,16 @@ class phRETS {
 		$return_photos = array();
 
 		if (empty($resource)) {
-			die("Resource parameter is required for GetObject() request.");
+			$this->fail("Resource parameter is required for GetObject() request.");
 		}
 		if (empty($type)) {
-			die("Type parameter is required for GetObject() request.");
+			$this->fail("Type parameter is required for GetObject() request.");
 		}
 		if (empty($id)) {
-			die("ID parameter is required for GetObject() request.");
+			$this->fail("ID parameter is required for GetObject() request.");
 		}
 		if (empty($this->capability_url['GetObject'])) {
-			die("GetObject() called but unable to find GetObject location.  Failed login?\n");
+			$this->fail("GetObject() called but unable to find GetObject location.  Failed login?");
 		}
 
 		$send_id = "";
@@ -616,8 +616,7 @@ class phRETS {
 	public function SearchGetFields($pointer_id) {
 		if (!empty($pointer_id)) {
 			return $this->search_data[$pointer_id]['column_names'];
-		}
-		else {
+		} else {
 			return false;
 		}
 	}
@@ -629,8 +628,7 @@ class phRETS {
 			unset($this->search_data[$pointer_id]['delimiter_character']);
 			unset($this->search_data[$pointer_id]['column_names']);
 			return true;
-		}
-		else {
+		} else {
 			return false;
 		}
 	}
@@ -956,7 +954,7 @@ class phRETS {
 			$this->fail("Lookup Name parameter is required in GetLookupValues() request.");
 		}
 		if (empty($this->capability_url['GetMetadata'])) {
-			$this->fail("GetLookupValues() called but unable to find GetMetadata location.  Failed login?\n");
+			$this->fail("GetLookupValues() called but unable to find GetMetadata location.  Failed login?");
 		}
 
 		// make request
@@ -1028,7 +1026,7 @@ class phRETS {
 		$this->reset_error_info();
 
 		if (empty($this->capability_url['GetMetadata'])) {
-			die("GetMetadataResources() called but unable to find GetMetadata location.  Failed login?\n");
+			$this->fail("GetMetadataResources() called but unable to find GetMetadata location.  Failed login?");
 		}
 
 		// make request
@@ -1099,7 +1097,7 @@ class phRETS {
 	 */
 	public function GetMetadataInfo($id = 0) {
 		if (empty($this->capability_url['GetMetadata'])) {
-			die("GetMetadataInfo() called but unable to find GetMetadata location.  Failed login?\n");
+			$this->fail("GetMetadataInfo() called but unable to find GetMetadata location.  Failed login?");
 		}
 		return $this->GetMetadataResources($id);
 	}
@@ -1115,13 +1113,13 @@ class phRETS {
 
 		$id = $resource.':'.$class;
 		if (empty($resource)) {
-			die("Resource parameter is required in GetMetadata() request.");
+			$this->fail("Resource parameter is required in GetMetadata() request.");
 		}
 		if (empty($class)) {
-			die("Class parameter is required in GetMetadata() request.");
+			$this->fail("Class parameter is required in GetMetadata() request.");
 		}
 		if (empty($this->capability_url['GetMetadata'])) {
-			die("GetMetadataTable() called but unable to find GetMetadata location.  Failed login?\n");
+			$this->fail("GetMetadataTable() called but unable to find GetMetadata location.  Failed login?");
 		}
 
 		// request specific metadata
@@ -1197,7 +1195,7 @@ class phRETS {
 
 	public function GetMetadata($resource, $class) {
 		if (empty($this->capability_url['GetMetadata'])) {
-			die("GetMetadata() called but unable to find GetMetadata location.  Failed login?\n");
+			$this->fail("GetMetadata() called but unable to find GetMetadata location.  Failed login?");
 		}
 		return $this->GetMetadataTable($resource, $class);
 	}
@@ -1207,10 +1205,10 @@ class phRETS {
 		$this->reset_error_info();
 
 		if (empty($id)) {
-			die("ID parameter is required in GetMetadataObjects() request.");
+			$this->fail("ID parameter is required in GetMetadataObjects() request.");
 		}
 		if (empty($this->capability_url['GetMetadata'])) {
-			die("GetMetadataObjects() called but unable to find GetMetadata location.  Failed login?\n");
+			$this->fail("GetMetadataObjects() called but unable to find GetMetadata location.  Failed login?");
 		}
 
 		// request basic metadata information
@@ -1278,7 +1276,7 @@ class phRETS {
 			$this->fail("ID parameter is required in GetMetadataClasses() request.");
 		}
 		if (empty($this->capability_url['GetMetadata'])) {
-			$this->fail("GetMetadataClasses() called but unable to find GetMetadata location.  Failed login?\n");
+			$this->fail("GetMetadataClasses() called but unable to find GetMetadata location.  Failed login?");
 		}
 
 		// request basic metadata information
@@ -1344,7 +1342,7 @@ class phRETS {
 		$this->reset_error_info();
 
 		if (empty($this->capability_url['GetMetadata'])) {
-			die("GetMetadataTypes() called but unable to find GetMetadata location.  Failed login?\n");
+			$this->fail("GetMetadataTypes() called but unable to find GetMetadata location.  Failed login?");
 		}
 
 		// request basic metadata information
@@ -1477,7 +1475,7 @@ class phRETS {
 		$this->reset_error_info();
 
 		if (empty($this->capability_url['GetMetadata'])) {
-			$this->fail("GetServerInformation() called but unable to find GetMetadata location.  Failed login?\n");
+			$this->fail("GetServerInformation() called but unable to find GetMetadata location.  Failed login?");
 		}
 
 		// request server information
@@ -1548,7 +1546,7 @@ class phRETS {
 		$this->reset_error_info();
 
 		if (empty($this->capability_url['Logout'])) {
-			$this->fail("Disconnect() called but unable to find Logout location.  Failed login?\n");
+			$this->fail("Disconnect() called but unable to find Logout location.  Failed login?");
 		}
 
 		// make request
