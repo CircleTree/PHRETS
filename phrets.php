@@ -12,14 +12,33 @@
 *    Low level: Framework for communicating with a RETS server.  High level functions sit on top of these
 *
 */
+/**
+ * Parent Class Exception
+ */
+class phRETSExceptionsClass extends Exception {
+	function  __construct ($message, $code = null) {
+		parent::__construct($message, $code);
+	}
+}
+/**
+ * runtime / configuration exceptions 
+ */
+class phRETSException extends Exception {
+}
+/**
+ * Server exceptions
+ */
+class retsException extends Exception {
+	
+}
+class retsXMLParsingException extends Exception {
+	
+}
+
 if (! class_exists("phRETS")) :
-
 class phRETS {
-
-
-	public $err;
-	public $capability_url = array();
-	private $ch;
+	private $service_urls = array();
+	private $curl_handle = false;
 	private $server_hostname;
 	private $server_port;
 	private $server_protocol;
@@ -29,7 +48,7 @@ class phRETS {
 	private $server_information = array();
 	private $cookie_file = "";
 	private $debug_file = "rets_debug.txt";
-	private $debug_file_handle = "rets_debug.txt";
+	private $debug_file_handle = false;
 	private $debug_mode;
 	private $allowed_capabilities = array(
 			"Action" => 1,
@@ -60,7 +79,6 @@ class phRETS {
 	private $force_basic_authentication = false;
 	private $use_interealty_ua_auth = false;
 	private $int_result_pointer = 0;
-	private $error_info = array();
 	private $last_request_url;
 	private $last_server_response;
 	private $session_id;
@@ -68,18 +86,46 @@ class phRETS {
 	private $disable_encoding_fix = false;
 	private $offset_support = false;
 	private $override_offset_protection = false;
+	private $is_connected = false;
+	/**
+	 * Stores messages regarding firewall test results
+	 * @var array
+	 */
+	private $firewall_messages = array();
+	//login
+	private $username;
+	private $password;
+	private $login_url;
+	/**
+	 * required php modules / capabilites
+	 * @var array
+	 */
+	private static $test_requirements = array('curl_init' , 'simplexml_load_string');
 	
+	public function is_connected() {
+		return $this->is_connected;
+	}
+	/**
+	 * connect to the remote server, and log in 
+	 */
+	public function connect () {
+		return false;
+	}
 	public function __construct($login_url, $username, $password, $ua_pwd = "") {
 	
-		if (empty($login_url)) {
-			$this->fail("Login URL missing from Connect()");
-		}
-		if (empty($username)) {
-			$this->fail("Username missing from Connect()");
-		}
-		if (empty($password)) {
-			$this->fail('No password supplied');
-		}
+		$this->username = $username;
+		$this->password = $password;
+		
+	
+		// chop up Login URL to use for later requests
+		$url_parts = parse_url($login_url);
+		$this->server_hostname = $url_parts['host'];
+		$this->server_port = ( empty($url_parts['port']) ) ? 80 : $url_parts['port'];
+		$this->server_protocol = $url_parts['scheme'];
+	
+		$this->service_urls['Login'] = $url_parts['path'];
+
+		
 		if (empty($this->static_headers['RETS-Version'])) {
 			$this->AddHeader("RETS-Version", "RETS/1.5");
 		}
@@ -89,83 +135,38 @@ class phRETS {
 		if (empty($this->static_headers['Accept']) && $this->static_headers['RETS-Version'] == "RETS/1.5") {
 			$this->AddHeader("Accept", "*/*");
 		}
-	
-		// chop up Login URL to use for later requests
-		$url_parts = parse_url($login_url);
-		$this->server_hostname = $url_parts['host'];
-		$this->server_port = (empty($url_parts['port'])) ? 80 : $url_parts['port'];
-		$this->server_protocol = $url_parts['scheme'];
-	
-		$this->capability_url['Login'] = $url_parts['path'];
-	
-		if (isset($url_parts['query']) && !empty($url_parts['query'])) {
-			$this->capability_url['Login'] .= "?{$url_parts['query']}";
+		
+		//Append query parms if set
+		if (isset($url_parts['query']) && ! empty($url_parts['query']) ) {
+			$this->service_urls['Login'] .= "?{$url_parts['query']}";
 		}
-	
-		$this->username = $username;
-		$this->password = $password;
-	
-		if (!empty($ua_pwd)) {
+		if (! empty($ua_pwd) ) {
 			// force use of RETS 1.7 User-Agent Authentication
 			$this->ua_auth = true;
 			$this->ua_pwd = $ua_pwd;
 		}
 	
+	
+	
 		if (empty($this->cookie_file)) {
 			$this->cookie_file = tempnam("", "phrets");
 		}
 	
-		@touch($this->cookie_file);
-	
 		if (!is_writable($this->cookie_file)) {
-			$this->set_error_info("phrets", -1, "Cookie file \"{$this->cookie_file}\" cannot be written to.  Must be an absolute path and must be writable");
-			return false;
+			throw new phRETSException("Cookie file \"{$this->cookie_file}\" cannot be written to.  
+			Must be an absolute path and must be writable");
 		}
-	
-		$this->ch = curl_init();
-		$curl_options = array(
-				CURLOPT_SSL_VERIFYPEER => false,
-				CURLOPT_HEADER => false,
-				CURLOPT_TIMEOUT => 0,
-				CURLOPT_COOKIEFILE => $this->cookie_file,
-				CURLOPT_RETURNTRANSFER => true,
-				CURLOPT_USERPWD => $this->username.":".$this->password,
-				CURLOPT_HEADERFUNCTION => array( &$this, 'read_custom_curl_headers'),
-			);
-		if ($this->disable_follow_location != true)
-			array_push($curl_options, array(CURLOPT_FOLLOWLOCATION => 1));
-		if ($this->force_basic_authentication == true)
-			array_push($curl_options, array(CURLOPT_HTTPAUTH => CURLAUTH_BASIC));
-		else
-			array_push($curl_options, array(CURLOPT_HTTPAUTH => CURLAUTH_DIGEST|CURLAUTH_BASIC));
+		@touch($this->cookie_file);
 		
-		if ($this->debug_mode == true) {
-			$this->debug_file_handle = @fopen($this->debug_file, 'a');
-			if ($this->debug_file_handle)
-			{
-				curl_setopt($this->ch, CURLOPT_VERBOSE, 1);
-				array_push($curl_options, array(CURLOPT_VERBOSE => true ));
-				array_push($curl_options, array(CURLOPT_STDERR => $this->debug_file ));
-			}
-			else
-			{
-				echo "Unable to save debug log to {$this->debug_file}\n";
-			}
-		}
-		curl_setopt_array($this->ch, $curl_options);
+		$this->initialize_curl();
 		// make request to Login transaction
-		$result =  $this->RETSRequest($this->capability_url['Login']);
-		if (!$result) {
-			return false;
-		}
+		
+		$result =  $this->RETSRequest($this->service_urls['Login']);
 	
 		list($headers,$body) = $result;
 		
 		// parse body response
 		$xml = $this->ParseXMLResponse($body);
-		if (!$xml) {
-			return false;
-		}
 		
 		// log replycode and replytext for reference later
 		$this->last_request['ReplyCode'] = "{$xml['ReplyCode']}";
@@ -176,12 +177,14 @@ class phRETS {
 		$login_response = array();
 		
 		if ($this->server_version == "RETS/1.0") {
+			//@codeCoverageIgnoreStart
 			if (isset($xml)) {
 			$login_response = explode("\r\n", $xml);
 				if (empty($login_response[3])) {
 					$login_response = explode("\n", $xml);
 				}
 			}
+			//@codeCoverageIgnoreEnd
 		} else {
 			if (isset($xml->{'RETS-RESPONSE'})) {
 				$login_response = explode("\r\n", $xml->{'RETS-RESPONSE'});
@@ -204,7 +207,7 @@ class phRETS {
 			$value = trim($value);
 			if (!empty($name) && !empty($value)) {
 				if (isset($this->allowed_capabilities[$name]) || preg_match('/^X\-/', $name) == true) {
-					$this->capability_url[$name] = $value;
+					$this->service_urls[$name] = $value;
 				} else {
 					$this->server_information[$name] = $value;
 				}
@@ -212,98 +215,174 @@ class phRETS {
 		}
 		
 		// if 'Action' capability URL is provided, we MUST request it following the successful Login
-		if (isset($this->capability_url['Action']) && !empty($this->capability_url['Action'])) {
-			$result = $this->RETSRequest($this->capability_url['Action']);
-			if (!$result) {
-				return false;
-			}
-			list($headers,$body) = $result;
-		}
-		
-		if ($this->compression_enabled == true) {
-			curl_setopt($this->ch, CURLOPT_ENCODING, "gzip");
+		if (isset($this->service_urls['Action']) && !empty($this->service_urls['Action'])) {
+			$this->RETSRequest($this->service_urls['Action']);
 		}
 		
 		if ($this->last_request['ReplyCode'] == 0) {
 			return true;
 		} else {
-			$this->set_error_info("rets", $this->last_request['ReplyCode'], $this->last_request['ReplyText']);
-			return false;
+			throw new retsException($this->last_request['ReplyText'], $this->last_request['ReplyCode']);
 		}
 	
 	}
-	
+	/**
+	 * initialize $this->curl_handle
+	 */
+	private function initialize_curl() {
+		//check if cURL is already initialized
+		if (is_resource($this->curl_handle)) 
+			return;
+		//Initialize
+		$this->curl_handle = curl_init();
+		$curl_options = array(
+				CURLOPT_SSL_VERIFYPEER => false,
+				CURLOPT_SSL_VERIFYHOST => false,
+				CURLOPT_HEADER => false,
+				CURLOPT_TIMEOUT => 10,
+				CURLOPT_COOKIEFILE => $this->cookie_file,
+				CURLOPT_RETURNTRANSFER => true,
+				CURLOPT_USERPWD => $this->username.":".$this->password,
+				CURLOPT_HEADERFUNCTION => array( $this, 'read_custom_curl_headers'),
+		);
+		if ($this->disable_follow_location != true || $this->compression_enabled == true)
+			array_push($curl_options, array(CURLOPT_ENCODING => "gzip"));
+		if ($this->disable_follow_location != true)
+			array_push($curl_options, array(CURLOPT_FOLLOWLOCATION => 1));
+		if ($this->force_basic_authentication == true)
+			array_push($curl_options, array(CURLOPT_HTTPAUTH => CURLAUTH_BASIC));
+		else
+			array_push($curl_options, array(CURLOPT_HTTPAUTH => CURLAUTH_DIGEST|CURLAUTH_BASIC));
+		
+		if ($this->debug_mode == true) {
+			$this->debug_file_handle = @fopen($this->debug_file, 'a');
+			if (is_resource( $this->debug_file_handle) ) {
+				array_push($curl_options, array(CURLOPT_VERBOSE => true ));
+				array_push($curl_options, array(CURLOPT_STDERR => $this->debug_file ));
+			} else {
+				throw new retsException("Unable to save debug log to {$this->debug_file}");
+			}
+		}
+		curl_setopt_array($this->curl_handle, $curl_options);
+	}
 
 	public function GetLastServerResponse() {
 		return $this->last_server_response;
 	}
-
+	/**
+	 * @codeCoverageIgnore
+	 * @deprecated use test_firewall
+	 */
+	public function FirewallTest() {
+		trigger_error(__METHOD__ . ' is Deprecated. Use phRETS::test_firewall()', E_USER_DEPRECATED);
+		$this->test_firewall();
+	}
 	/**
 	 * Tests internet connectivity
 	 * @return bool true on success, false on failure
 	 */
-	public function FirewallTest() {
-		$google = $this->FirewallTestConn("google.com", 80);
-		$crt80 = $this->FirewallTestConn("demo.crt.realtors.org", 80);
-		$crt6103 = $this->FirewallTestConn("demo.crt.realtors.org", 6103);
-		$flexmls80 = $this->FirewallTestConn("retsgw.flexmls.com", 80);
-		$flexmls6103 = $this->FirewallTestConn("retsgw.flexmls.com", 6103);
-
-		if (!$google && !$crt80 && !$crt6103 && !$flexmls80 && !$flexmls6103) {
+	public function test_firewall () {
+		$google = $this->do_firewall_test_connection("http://www.google.com/");
+		$crt80 = $this->do_firewall_test_connection("http://demo.crt.realtors.org/");
+		$dis6103 = $this->do_firewall_test_connection("http://dis.com:6103/rets/");
+		$flexmls80 = $this->do_firewall_test_connection("http://retsgw.flexmls.com/");
+		$flexmls6103 = $this->do_firewall_test_connection("http://retsgw.flexmls.com:6103/");
+		
+		//we ignore the polymorphisms here because they are too difficult to test
+		//@codeCoverageIgnoreStart
+		if (!$google && !$crt80 && !$dis6103 && !$flexmls80 && !$flexmls6103) {
 			$msg = "Firewall Result: All tests failed.  Possible causes:";
 			$msg .= "<ol>";
 			$msg .= "<li>Firewall is blocking your outbound connections</li>";
 			$msg .= "<li>You aren't connected to the internet</li>";
 			$msg .= "</ol>";
-			$this->fail($msg);
+			array_unshift($this->firewall_messages, $msg);
 			return false;
 		}
-
-		if (!$crt6103 && !$flexmls6103) {
+		
+		if (!$dis6103 && !$flexmls6103) {
 			$msg = "Firewall Result: All port 6103 tests failed.  ";
 			$msg .= "Likely cause: Firewall is blocking your outbound connections on port 6103.";
-			$this->fail($msg);
+			array_unshift($this->firewall_messages, $msg);
 			return false;
 		}
-
-		if ($google && $crt6103 && $crt80 && $flexmls6103 && $flexmls80) {
+		
+		if ($google && $dis6103 && $crt80 && $flexmls6103 && $flexmls80) {
 			$msg = "Firewall Result: All tests passed.";
-			$this->warn($msg);
+			array_unshift($this->firewall_messages, $msg);
 			return true;
 		}
-
-		if (($crt6103 && !$flexmls6103) || (!$crt6103 && $flexmls6103)) {
+		
+		if (($dis6103 && !$flexmls6103) || (!$dis6103 && $flexmls6103)) {
 			$msg = "Firewall Result: At least one port 6103 test passed.  ";
 			$msg .= "Likely cause: One of the test servers might be down but connections on port 80 and port 6103 should work.";
-			$this->warn($msg);
+			array_unshift($this->firewall_messages, $msg);
 			return true;
 		}
-
+		
 		if (!$google || !$crt80 || !$flexmls80) {
 			$msg = "Firewall Result: At least one port 80 test failed.  ";
 			$msg .= "Likely cause: One of the test servers might be down.";
-			$this->warn($msg);
+			array_unshift($this->firewall_messages, $msg);
 			return true;
 		}
-
+		
 		$msg = "Firewall Test Failure: Unable to guess the issue.";
-		$this->fail($msg);
+		array_unshift($this->firewall_messages, $msg);
 		return false;
-
+		//@codeCoverageIgnoreEnd
 	}
-
-
-	private function FirewallTestConn($hostname, $port = 6103) {
-		$fp = @fsockopen($hostname, $port, $errno, $errstr, 5);
-
-		if (!$fp) {
-			$this->warn("Firewall Test: {$hostname}:{$port} FAILED");
-			return false;
+	private static function test_required_capabilities() {
+		$return = array();		
+		foreach (self::$test_requirements as $requirement) {
+			if ( function_exists($requirement) ) {
+				$return[ $requirement ] = true;
+			} else {
+				$return[ $requirement ] = false;
+			}
 		}
-		else {
-			@fclose($fp);
-			$this->warn("Firewall Test: {$hostname}:{$port} GOOD");
+		return $return;
+	}
+	/**
+	 * @return bool true if met, false if not.
+	 * use get_test_requirements to see failed
+	 */
+	public static function test_requirements_met () {
+		if (false === array_search(false, self::test_required_capabilities())) {
 			return true;
+		} else {
+			//@codeCoverageIgnoreStart
+			return false;
+			//@codeCoverageIgnoreEnd
+		}
+	}
+	/**
+	 * gets test statuses
+	 * @return array function name => true/false
+	 */
+	public static function get_test_requirements () {
+		return self::test_required_capabilities();
+	}
+	/**
+	 * gets firewall messages, running a test if the messages array is empty
+	 * @return array messages of successes  / failures
+	 */
+	public function get_firewall_messages() {
+		if ( 0 === count($this->firewall_messages) ) {
+			$this->test_firewall();
+		}
+		return $this->firewall_messages;
+	}
+	private function do_firewall_test_connection($hostname) {
+		curl_setopt($this->curl_handle, CURLOPT_URL, $hostname);
+		curl_exec($this->curl_handle);
+		$response_code = curl_getinfo($this->curl_handle, CURLINFO_HTTP_CODE);
+		if ($response_code == 200 || $response_code == 304 || $response_code == 403) {
+			$this->firewall_messages[] = "Firewall Test: {$hostname} GOOD";
+			return true;
+		} else {
+			$this->firewall_messages[] = "Firewall Test: {$hostname} FAILED. HTTP Status Code: ".$response_code;
+			return false;
 		}
 
 	}
@@ -318,20 +397,24 @@ class phRETS {
  * @return boolean|multitype:boolean multitype:string boolean unknown
  */
 	public function GetObject($resource, $type, $id, $photo_number = '*', $location = FALSE) {
-		$this->reset_error_info();
+		
 		$return_photos = array();
 
 		if (empty($resource)) {
 			$this->fail("Resource parameter is required for GetObject() request.");
+			return false;
 		}
 		if (empty($type)) {
 			$this->fail("Type parameter is required for GetObject() request.");
+			return false;
 		}
 		if (empty($id)) {
 			$this->fail("ID parameter is required for GetObject() request.");
+			return false;
 		}
-		if (empty($this->capability_url['GetObject'])) {
+		if (empty($this->service_urls['GetObject'])) {
 			$this->fail("GetObject() called but unable to find GetObject location.  Failed login?");
+			return false;
 		}
 
 		$send_id = "";
@@ -381,7 +464,7 @@ class phRETS {
 
 		// make request
 		$location_int = $location ? 1 : 0; 
-		$result = $this->RETSRequest($this->capability_url['GetObject'],
+		$result = $this->RETSRequest($this->service_urls['GetObject'],
 						array(
 								'Resource' => $resource,
 								'Type' => $type,
@@ -582,12 +665,20 @@ class phRETS {
 		return $return_photos;
 	}
 
-
+	/**
+	 * does the response contain a maxrows element?
+	 * @see Rets 1.7.2::7.4.3 Limit
+	 * @param bool true if there are more rows
+	 */
 	public function IsMaxrowsReached($pointer_id = "") {
 		if (empty($pointer_id)) {
 			$pointer_id = $this->int_result_pointer;
 		}
-		return $this->search_data[$pointer_id]['maxrows_reached'];
+		if (isset($this->search_data)) {
+			return $this->search_data[$pointer_id]['maxrows_reached'];
+		} else {
+			return false;
+		}
 	}
 
 	/**
@@ -598,7 +689,11 @@ class phRETS {
 		if (empty($pointer_id)) {
 			$pointer_id = $this->int_result_pointer;
 		}
-		return $this->search_data[$pointer_id]['total_records_found'];
+		if ( isset( $this->search_data )) {
+			return $this->search_data[$pointer_id]['total_records_found'];
+		} else {
+			return false;
+		}
 	}
 
 	/**
@@ -610,19 +705,27 @@ class phRETS {
 		if (empty($pointer_id)) {
 			$pointer_id = $this->int_result_pointer;
 		}
-		return $this->search_data[$pointer_id]['last_search_returned'];
-	}
-
-
-	public function SearchGetFields($pointer_id) {
-		if (!empty($pointer_id)) {
-			return $this->search_data[$pointer_id]['column_names'];
+		if (isset($this->search_data)) {
+			return $this->search_data[$pointer_id]['last_search_returned'];
 		} else {
 			return false;
 		}
 	}
 
+	public function SearchGetFields($pointer_id) {
+		if (! empty($pointer_id) ) {
+			if (isset($this->search_data[ $pointer_id ])) {
+				return $this->search_data[$pointer_id]['column_names'];
+			} else {
+				return false;
+			}			
+		} else {
+			return false;
+		}
+	}
+	
 
+	
 	public function FreeResult($pointer_id) {
 		if (!empty($pointer_id)) {
 			unset($this->search_data[$pointer_id]['data']);
@@ -636,33 +739,29 @@ class phRETS {
 
 
 	public function FetchRow($pointer_id) {
-
+		if (empty($pointer_id) || (! isset( $this->search_data[$pointer_id] ))) {
+			return false;
+		}
 		$this_row = false;
-
-		if (!empty($pointer_id)) {
-
-			if (isset($this->search_data[$pointer_id]['data'])) {
-				$field_data = current($this->search_data[$pointer_id]['data']);
-				next($this->search_data[$pointer_id]['data']);
-			}
-
-			if (!empty($field_data)) {
-				$this_row = array();
-
-				// split up DATA row on delimiter found earlier
-				$field_data = preg_replace("/^{$this->search_data[$pointer_id]['delimiter_character']}/", "", $field_data);
-				$field_data = preg_replace("/{$this->search_data[$pointer_id]['delimiter_character']}\$/", "", $field_data);
-				$field_data = explode($this->search_data[$pointer_id]['delimiter_character'], $field_data);
-
-				foreach ($this->search_data[$pointer_id]['column_names'] as $key => $name) {
-					// assign each value to it's name retrieved in the COLUMNS earlier
-					$this_row[$name] = $field_data[$key];
-				}
-			}
+		if (isset($this->search_data[$pointer_id]['data'])) {
+			$field_data = current($this->search_data[$pointer_id]['data']);
+			next($this->search_data[$pointer_id]['data']);
 		}
 
-		return $this_row;
+		if ( !empty($field_data) ) {
+			$this_row = array();
 
+			// split up DATA row on delimiter found earlier
+			$field_data = preg_replace("/^{$this->search_data[$pointer_id]['delimiter_character']}/", "", $field_data);
+			$field_data = preg_replace("/{$this->search_data[$pointer_id]['delimiter_character']}\$/", "", $field_data);
+			$field_data = explode($this->search_data[$pointer_id]['delimiter_character'], $field_data);
+
+			foreach ($this->search_data[$pointer_id]['column_names'] as $key => $name) {
+				// assign each value to it's name retrieved in the COLUMNS earlier
+				$this_row[$name] = $field_data[$key];
+			}
+		}
+		return $this_row;
 	}
 	
 	/**
@@ -682,21 +781,13 @@ class phRETS {
 	 * @param string $resource RETS resource (Property,Agent, etc.)
 	 * @param string $class RETS class id to query
 	 * @param string $query DMQL query string
-	 * @param array $optional_params array of RETS 
+	 * @param array $optional_params array of RETS
+	 * @return int internal result pointer ID 
+	 * @todo update $query param to being optional with rets 1.8.0
 	 */
-	public function SearchQuery($resource, $class, $query = "", $optional_params = array()) {
-		$this->reset_error_info();
+	public function SearchQuery($resource, $class, $query, $optional_params = array()) {
 
-		if (empty($resource)) {
-			$this->fail('Resource parameter is required');
-		}
-		if (empty($class)) {
-			$this->fail("Class parameter is required in SearchQuery() request.");
-		}
-		if (empty($this->capability_url['Search'])) {
-			$this->fail("SearchQuery() called but unable to find Search location.  Failed login?");
-		}
-
+		//increment results pointer
 		$this->int_result_pointer++;
 		$this->search_data[$this->int_result_pointer]['last_search_returned'] = 0;
 		$this->search_data[$this->int_result_pointer]['total_records_found'] = 0;
@@ -704,58 +795,37 @@ class phRETS {
 		$this->search_data[$this->int_result_pointer]['delimiter_character'] = "";
 		$this->search_data[$this->int_result_pointer]['search_requests'] = 0;
 
-		// setup request arguments
-		$search_arguments = array();
-
-		$search_arguments['SearchType'] = $resource;
-		$search_arguments['Class'] = $class;
-
-		// due to a lack of forward-thinking, reversing a previous decision
-		// check if the query passed is missing the outer parenthesis
-		// if so, add them
-		if (empty($query)) {
-			// do nothing.  http://retsdoc.onconfluence.com/display/rcpcenter/RCP+80+-+Optional+Query
-		}
-		elseif ($query == "*" || preg_match('/^\((.*)\)$/', $query)) {
+		// setup default request arguments
+		$default_arguments = array(
+				'QueryType' => "DMQL2",
+				'SearchType' => $resource,
+				'Class' => $class,
+				'Count' => 1,
+				'Format' => "COMPACT-DECODED",
+				'Limit' => 99999999,
+				'StandardNames' => 0,
+				'Select' => null,
+				'RestrictedIndicator' => '*************'
+			);
+		// setup additional, optional request arguments
+		$search_arguments = array_merge($default_arguments, $optional_params);
+		if ($query == "*" || preg_match('/^\((.*)\)$/', $query)) {
+			// check if the query passed is missing the outer parenthesis
 			$search_arguments['Query'] = $query;
-		}
-		else {
+		} else {
+			// if so, add them
 			$search_arguments['Query'] = '('.$query.')';
 		}
 
-
-		if (isset($search_arguments['Query'])) {
-			$search_arguments['QueryType'] = "DMQL2";
-		}
-
-		if (!empty($optional_params['QueryType'])) {
-			$search_arguments['QueryType'] = $optional_params['QueryType'];
-		}
-
-		// setup additional, optional request arguments
-		$search_arguments['Count'] = empty($optional_params['Count']) ? 1 : $optional_params['Count'];
-		$search_arguments['Format'] = empty($optional_params['Format']) ? "COMPACT-DECODED" : $optional_params['Format'];
-		$search_arguments['Limit'] = empty($optional_params['Limit']) ? 99999999 : $optional_params['Limit'];
-
 		if (isset($optional_params['Offset'])) {
 			$search_arguments['Offset'] = $optional_params['Offset'];
-		}
-		elseif ($this->offset_support && empty($optional_params['Offset'])) {
+		} elseif ($this->offset_support && empty($optional_params['Offset'])) {
 			// start auto-offset looping with Offset at 1
 			$search_arguments['Offset'] = 1;
 		}
-		else { }
 
-		if (!empty($optional_params['Select'])) {
-			$search_arguments['Select'] = $optional_params['Select'];
-		}
-		if (!empty($optional_params['RestrictedIndicator'])) {
-			$search_arguments['RestrictedIndicator'] = $optional_params['RestrictedIndicator'];
-		}
-
-		$search_arguments['StandardNames'] = empty($optional_params['StandardNames']) ? 0 : $optional_params['StandardNames'];
-
-		$continue_searching = true; // Keep searching if MAX ROWS is reached and offset_support is true
+		// Keep searching if MAX ROWS is reached and offset_support is true
+		$continue_searching = true; 
 		while ($continue_searching) {
 
 			$this->search_data[$this->int_result_pointer]['maxrows_reached'] = false;
@@ -766,31 +836,23 @@ class phRETS {
 				// which is considered excessive.  stopping the process in order to prevent
 				// abuse against the server.  almost ALWAYS happens when the user thinks Offset
 				// is supported by the server when it's actually NOT supported
-				$this->set_error_info("phrets", -1, "Last SearchQuery() has resulted in 300+ requests to the server.  Stopping to prevent abuse");
-				return false;
+				throw phRETSException("Last SearchQuery() has resulted in 300+ requests to the server.  Stopping to prevent abuse");
 			}
 
 			// make request
-			$result = $this->RETSRequest($this->capability_url['Search'], $search_arguments);
-			if (!$result) {
-				return false;
-			}
+			$result = $this->RETSRequest($this->service_urls['Search'], $search_arguments);
 			list($headers, $body) = $result;
 
 			$body = $this->fix_encoding($body);
 
 			$xml = $this->ParseXMLResponse($body);
-			if (!$xml) {
-				return false;
-			}
 
 			// log replycode and replytext for reference later
 			$this->last_request['ReplyCode'] = "{$xml['ReplyCode']}";
 			$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
 
 			if ($xml['ReplyCode'] != 0) {
-				$this->set_error_info("rets", "{$xml['ReplyCode']}", "{$xml['ReplyText']}");
-				return false;
+				throw new retsException($xml['ReplyText'], $xml['ReplyCode']);				
 			}
 
 			if (isset($xml->DELIMITER)) {
@@ -831,8 +893,7 @@ class phRETS {
 			if ($this->IsMaxrowsReached($this->int_result_pointer) && $this->offset_support) {
 				$continue_searching = true;
 				$search_arguments['Offset'] = $this->NumRows($this->int_result_pointer) + 1;
-			}
-			else {
+			} else {
 				$continue_searching = false;
 			}
 		}
@@ -841,15 +902,17 @@ class phRETS {
 	}
 	
 	/**
-	 * Shorthand for SearchQuery
+	 * Returns data datatable of results
 	 * @see phRETS::SearchQuery()
+	 * @return array $data[] = row
 	 */
 
 	public function Search($resource, $class, $query = "", $optional_params = array()) {
-		$data_table = array();
 
 		$int_result_pointer = $this->SearchQuery($resource, $class, $query, $optional_params);
 
+		$data_table = array();
+		
 		while ($row = $this->FetchRow($int_result_pointer)) {
 			$data_table[] = $row;
 		}
@@ -863,17 +926,19 @@ class phRETS {
  * @return array $values 
  */
 	public function GetAllLookupValues($resource) {
-		$this->reset_error_info();
+		
 
 		if (empty($resource)) {
 			$this->fail("Resource parameter is required in GetAllLookupValues() request.");
+			return false;
 		}
-		if (empty($this->capability_url['GetMetadata'])) {
+		if (empty($this->service_urls['GetMetadata'])) {
 			$this->fail("GetAllLookupValues() called but unable to find GetMetadata location.  Failed login?");
+			return false;
 		}
 
 		// make request
-		$result = $this->RETSRequest($this->capability_url['GetMetadata'],
+		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
 								'Type' => 'METADATA-LOOKUP_TYPE',
 								'ID' => $resource.':*',
@@ -892,8 +957,7 @@ class phRETS {
 		}
 
 		if ($xml['ReplyCode'] != 0) {
-			$this->set_error_info("rets", "{$xml['ReplyCode']}", "{$xml['ReplyText']}");
-			return false;
+			throw new retsException($xml['ReplyText'], $xml['ReplyCode']);
 		}
 
 		$this_table = array();
@@ -939,27 +1003,30 @@ class phRETS {
 /**
  * Get values for an individual type (WARNING - does an API call for each LookupName)
  * @TODO refactor this to cache the results to limit API calls for loops
- * 	Maybe add a third param $cache = false, where the interface will allow a dev
- * 	to specify that it should to an 'ID' => resource:* call and cache the result 
+ * 	Maybe add a third param $cache = true, where the interface will allow a dev
+ * 	to specify that it should do an 'ID' => resource:* call and cache the result 
  * 	for use in subsequent lookup value requests
  * @param string $resource Class name
  * @param string $lookupname metadata LookupName
  */
 	public function GetLookupValues($resource, $lookupname) {
-		$this->reset_error_info();
+		
 
 		if (empty($resource)) {
 			$this->fail("Resource parameter is required in GetLookupValues() request.");
+			return false;
 		}
 		if (empty($lookupname)) {
 			$this->fail("Lookup Name parameter is required in GetLookupValues() request.");
+			return false;
 		}
-		if (empty($this->capability_url['GetMetadata'])) {
+		if (empty($this->service_urls['GetMetadata'])) {
 			$this->fail("GetLookupValues() called but unable to find GetMetadata location.  Failed login?");
+			return false;
 		}
 
 		// make request
-		$result = $this->RETSRequest($this->capability_url['GetMetadata'],
+		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
 								'Type' => 'METADATA-LOOKUP_TYPE',
 								'ID' => $resource.':'.$lookupname,
@@ -978,8 +1045,7 @@ class phRETS {
 		}
 
 		if ($xml['ReplyCode'] != 0) {
-			$this->set_error_info("rets", "{$xml['ReplyCode']}", "{$xml['ReplyText']}");
-			return false;
+			throw new retsException($xml['ReplyText'], $xml['ReplyCode']);
 		}
 
 		$this_table = array();
@@ -1024,14 +1090,9 @@ class phRETS {
  * @return array  
  */
 	public function GetMetadataResources($id = 0) {
-		$this->reset_error_info();
-
-		if (empty($this->capability_url['GetMetadata'])) {
-			$this->fail("GetMetadataResources() called but unable to find GetMetadata location.  Failed login?");
-		}
-
+		
 		// make request
-		$result = $this->RETSRequest($this->capability_url['GetMetadata'],
+		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
 								'Type' => 'METADATA-RESOURCE',
 								'ID' => $id,
@@ -1039,20 +1100,11 @@ class phRETS {
 								)
 						);
 
-		if (!$result) {
-			return false;
-		}
 		list($headers, $body) = $result;
 
 		$xml = $this->ParseXMLResponse($body);
-		if (!$xml) {
-			return false;
-		}
 
-		if ($xml['ReplyCode'] != 0) {
-			$this->set_error_info("rets", "{$xml['ReplyCode']}", "{$xml['ReplyText']}");
-			return false;
-		}
+		
 
 		$this_resource = array();
 
@@ -1094,12 +1146,9 @@ class phRETS {
 
 	/**
 	 * @see phRETS::GetMetadataResources($id);
-	 * @param unknown_type $id
+	 * @param int $id
 	 */
 	public function GetMetadataInfo($id = 0) {
-		if (empty($this->capability_url['GetMetadata'])) {
-			$this->fail("GetMetadataInfo() called but unable to find GetMetadata location.  Failed login?");
-		}
 		return $this->GetMetadataResources($id);
 	}
 
@@ -1110,21 +1159,24 @@ class phRETS {
 	 * @see phRETS::GetMetadataClasses();
 	 */
 	public function GetMetadataTable($resource, $class) {
-		$this->reset_error_info();
+		
 
 		$id = $resource.':'.$class;
 		if (empty($resource)) {
 			$this->fail("Resource parameter is required in GetMetadata() request.");
+			return false;
 		}
 		if (empty($class)) {
 			$this->fail("Class parameter is required in GetMetadata() request.");
+			return false;
 		}
-		if (empty($this->capability_url['GetMetadata'])) {
+		if (empty($this->service_urls['GetMetadata'])) {
 			$this->fail("GetMetadataTable() called but unable to find GetMetadata location.  Failed login?");
+			return false;
 		}
 
 		// request specific metadata
-		$result = $this->RETSRequest($this->capability_url['GetMetadata'],
+		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
 								'Type' => 'METADATA-TABLE',
 								'ID' => $id,
@@ -1147,8 +1199,7 @@ class phRETS {
 		$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
 
 		if ($xml['ReplyCode'] != 0) {
-			$this->set_error_info("rets", "{$xml['ReplyCode']}", "{$xml['ReplyText']}");
-			return false;
+			throw new retsException($xml['ReplyText'], $xml['ReplyCode']);
 		}
 
 		$this_table = array();
@@ -1195,25 +1246,28 @@ class phRETS {
 
 
 	public function GetMetadata($resource, $class) {
-		if (empty($this->capability_url['GetMetadata'])) {
+		if (empty($this->service_urls['GetMetadata'])) {
 			$this->fail("GetMetadata() called but unable to find GetMetadata location.  Failed login?");
+			return false;
 		}
 		return $this->GetMetadataTable($resource, $class);
 	}
 
 
 	public function GetMetadataObjects($id) {
-		$this->reset_error_info();
+		
 
 		if (empty($id)) {
 			$this->fail("ID parameter is required in GetMetadataObjects() request.");
+			return false;
 		}
-		if (empty($this->capability_url['GetMetadata'])) {
+		if (empty($this->service_urls['GetMetadata'])) {
 			$this->fail("GetMetadataObjects() called but unable to find GetMetadata location.  Failed login?");
+			return false;
 		}
 
 		// request basic metadata information
-		$result = $this->RETSRequest($this->capability_url['GetMetadata'],
+		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
 								'Type' => 'METADATA-OBJECT',
 								'ID' => $id,
@@ -1236,8 +1290,7 @@ class phRETS {
 		$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
 
 		if ($xml['ReplyCode'] != 0) {
-			$this->set_error_info("rets", "{$xml['ReplyCode']}", "{$xml['ReplyText']}");
-			return false;
+			throw new retsException($xml['ReplyText'], $xml['ReplyCode']);
 		}
 
 		$return_data = array();
@@ -1271,17 +1324,8 @@ class phRETS {
 	 * @param string $id Resource name (Property, User, Etc.)
 	 */
 	public function GetMetadataClasses($id) {
-		$this->reset_error_info();
-
-		if (empty($id)) {
-			$this->fail("ID parameter is required in GetMetadataClasses() request.");
-		}
-		if (empty($this->capability_url['GetMetadata'])) {
-			$this->fail("GetMetadataClasses() called but unable to find GetMetadata location.  Failed login?");
-		}
-
 		// request basic metadata information
-		$result = $this->RETSRequest($this->capability_url['GetMetadata'],
+		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
 								'Type' => 'METADATA-CLASS',
 								'ID' => $id,
@@ -1289,23 +1333,16 @@ class phRETS {
 								)
 						);
 
-		if (!$result) {
-			return false;
-		}
 		list($headers, $body) = $result;
 
 		$xml = $this->ParseXMLResponse($body);
-		if (!$xml) {
-			return false;
-		}
 
 		// log replycode and replytext for reference later
 		$this->last_request['ReplyCode'] = "{$xml['ReplyCode']}";
 		$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
 
 		if ($xml['ReplyCode'] != 0) {
-			$this->set_error_info("rets", "{$xml['ReplyCode']}", "{$xml['ReplyText']}");
-			return false;
+			throw new retsException($xml['ReplyText'], $xml['ReplyCode']);
 		}
 
 		$return_data = array();
@@ -1340,14 +1377,15 @@ class phRETS {
 
 
 	public function GetMetadataTypes($id = 0) {
-		$this->reset_error_info();
+		
 
-		if (empty($this->capability_url['GetMetadata'])) {
+		if (empty($this->service_urls['GetMetadata'])) {
 			$this->fail("GetMetadataTypes() called but unable to find GetMetadata location.  Failed login?");
+			return false;
 		}
 
 		// request basic metadata information
-		$result = $this->RETSRequest($this->capability_url['GetMetadata'],
+		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
 								'Type' => 'METADATA-CLASS',
 								'ID' => $id,
@@ -1369,8 +1407,7 @@ class phRETS {
 		$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
 
 		if ($xml['ReplyCode'] != 0) {
-			$this->set_error_info("rets", "{$xml['ReplyCode']}", "{$xml['ReplyText']}");
-			return false;
+			throw new retsException($xml['ReplyText'], $xml['ReplyCode']);
 		}
 
 		$return_data = array();
@@ -1415,72 +1452,57 @@ class phRETS {
 	}
 
 	/**
-	 *  Check RETS authentication support
-	 * @param string $type authentication type. currently supports basic & digest
+	 * Check RETS for a type authentication support
+	 * @param string $type basic / digest. authentication type. 
 	 * @return boolean true when supported, false for no support
 	 */
-	public function CheckAuthSupport($type = "") {
+	public function is_auth_type_supported($type) {
 		if ($type == "basic") {
 			return $this->auth_support_basic;
 		}
 		if ($type == "digest") {
 			return $this->auth_support_digest;
 		}
-		$this->set_error_info("phrets", -1, "Unknown auth type requested.");
-		return false;
+		throw new phRETSException('Unknown Authentication Type: ' . $type);
 	}
 
 	/**
-	 * read through capability_urls read during the Login and return
+	 * read through service_urlss read during the Login and return
 	 * @return array $transactions
 	 */
 	public function GetAllTransactions() {
 		$transactions = array();
-		if (is_array($this->capability_url)) {
-			foreach ($this->capability_url as $key => $value) {
+		if (is_array($this->service_urls)) {
+			foreach ($this->service_urls as $key => $value) {
 				$transactions[] = $key;
 			}
 		}
 		return $transactions;
 	}
 
-
+	/**
+	 * @return string url
+	 */
 	public function LastRequestURL() {
 		return $this->last_request_url;
 	}
 
 
-	public function GetLoginURL() {
-		// see if the saved Login URL has a hostname included.
-		// if not, make it based on the URL given in the Connect() call
-		$parse_results = parse_url($this->capability_url['Login'], PHP_URL_HOST);
-		if (empty($parse_results)) {
-			// login transaction gave a relative path for this action
-			$request_url = $this->server_protocol.'://'.$this->server_hostname.':'.$this->server_port.''.$this->capability_url['Login'];
-		} else {
-			// login transaction gave an absolute path for this action
-			$request_url = $this->capability_url['Login'];
-		}
-		if (empty($request_url)) {
-			$this->set_error_info("phrets", -1, "Unable to find a login URL.  Did initial login fail?");
-			return false;
-		}
-		return $request_url;
-	}
-
-	/**
+	
+/**
 	 * Gets server info
 	 * @return array $info
 	 */
 	public function GetServerInformation() {
-		$this->reset_error_info();
+		
 
-		if (empty($this->capability_url['GetMetadata'])) {
+		if (empty($this->service_urls['GetMetadata'])) {
 			$this->fail("GetServerInformation() called but unable to find GetMetadata location.  Failed login?");
+			return false;
 		}
 
 		// request server information
-		$result = $this->RETSRequest($this->capability_url['GetMetadata'],
+		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
 								'Type' => 'METADATA-SYSTEM',
 								'ID' => 0,
@@ -1488,20 +1510,9 @@ class phRETS {
 								)
 						);
 
-		if (!$result) {
-			return false;
-		}
 		list($headers, $body) = $result;
 
 		$xml = $this->ParseXMLResponse($body);
-		if (!$xml) {
-			return false;
-		}
-
-		if ($xml['ReplyCode'] != 0) {
-			$this->set_error_info("rets", "{$xml['ReplyCode']}", "{$xml['ReplyText']}");
-			return false;
-		}
 
 		$system_id = "";
 		$system_description = "";
@@ -1515,8 +1526,8 @@ class phRETS {
 				$system_description = "{$xml->METADATA->{'METADATA-SYSTEM'}->System->SystemDescription}";
 			}
 			$timezone_offset = "";
-		}
-		else {
+		} else {
+			//@codeCoverageIgnoreStart
 			if (isset($xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemID)) {
 				$system_id = "{$xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemID}";
 			}
@@ -1526,6 +1537,7 @@ class phRETS {
 			if (isset($xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->TimeZoneOffset)) {
 				$timezone_offset = "{$xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->TimeZoneOffset}";
 			}
+			//@codeCoverageIgnoreEnd
 		}
 
 		if (isset($xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->Comments)) {
@@ -1544,24 +1556,25 @@ class phRETS {
 	 * Logs out current RETS Session
 	 */
 	public function Disconnect () {
-		$this->reset_error_info();
+		
 
-		if (empty($this->capability_url['Logout'])) {
+		if (empty($this->service_urls['Logout'])) {
 			$this->fail("Disconnect() called but unable to find Logout location.  Failed login?");
+			return false;
 		}
 
 		// make request
-		$result = $this->RETSRequest($this->capability_url['Logout']);
+		$result = $this->RETSRequest($this->service_urls['Logout']);
 		if (!$result) {
 			return false;
 		}
 
 		// close cURL connection
-		curl_close($this->ch);
+		curl_close($this->curl_handle);
 
-		if ($this->debug_mode == true) {
+		if ($this->debug_mode == true && $this->debug_file_handle && is_resource($this->debug_file_handle)) {
 			// close cURL debug log file handler
-			fclose($this->debug_log);
+			fclose($this->debug_file_handle);
 		}
 
 		if (file_exists($this->cookie_file)) {
@@ -1571,46 +1584,14 @@ class phRETS {
 		return true;
 
 	}
-	/**
-	 * utility to handle critical errors
-	 * @access protected 
-	 **/
-	protected function fail($msg) {
-		$msg = 'Error '.$msg.' In:'.PHP_EOL;
-		$debug = debug_backtrace();
-		$msg .= $debug[1]['file'].'::'.$debug[1]['line'];
-		die($msg);
-	}
-	/**
-	 * utility to handle warnings
-	 * @access protected
-	 **/
-	protected function warn ($msg) {
-		echo $msg;
-	}
-
-
-	public function LastRequest() {
-		// return replycode and replytext from last request
-		return $this->last_request;
-	}
 
 	/**
 	 * add static header for cURL requests
 	 * @param string $name header key
 	 * @param string $value raw HTTP header
 	 */
-	public function AddHeader($name, $value) {
+	private function AddHeader($name, $value) {
 		$this->static_headers[$name] = $value;
-		return true;
-	}
-
-	/**
-	 * delete static header from cURL requests 
-	 * @param string $name header key to delete
-	 */
-	public function DeleteHeader($name) {
-		unset($this->static_headers[$name]);
 		return true;
 	}
 
@@ -1619,47 +1600,44 @@ class phRETS {
 	 * @param string $data raw XML data
 	 * @return object SimpleXMLElement 
 	 */
-	public function ParseXMLResponse($data = "") {
-		$this->reset_error_info();
-		if (empty( $data ) ) {
-			$this->fail('No XML Data to Parse');
-		}
+	public function ParseXMLResponse( $data ) {
 		// parse XML function.  
-		// ability to replace SimpleXML with something later fairly easily
 		$xml = @simplexml_load_string($data);
-		if (!is_object($xml)) {
-			$this->set_error_info("xml", -1, "XML parsing error: {$data}");
-			$this->err = "XML Parsing error: {$data}";
-			return false;
+		if ( !is_object($xml) ) {
+			throw new retsXMLParsingException('Error parsing string into XML. Data: ' . $data);			
+		}
+		if (0 != $xml['ReplyCode'] ) {
+			throw new retsException($xml['ReplyText'], (int) $xml['ReplyCode']);
 		}
 		return $xml;
 	}
 
 	/**
 	 * Low Level RETS transaction implementation
-	 * @param string $action use the public phRETS->capability_url array for the URL
+	 * @param string $service_url use the public phRETS->service_urls array for the URL
 	 * @param array $parameters RETS transaction
 	 * @return array array($this->last_response_headers_raw, $response_body);
 	 */
-	public function RETSRequest($action, $parameters = "") {
+	public function RETSRequest($request_service_url, $parameters = "") {
 		
 		//Reset per-request class variables
-		$this->reset_error_info();
+		
 		$this->last_response_headers = array();
-		$this->err = $this->last_response_headers_raw =	$this->last_remembered_header = "";
+		$this->last_response_headers_raw =	$this->last_remembered_header = "";
 
-		if (empty($action)) {
+		if (empty($request_service_url)) {
 			$this->fail("RETSRequest called but Action passed has no value.  Failed login?");
+			return false;
 		}
 
-		$parse_results = parse_url($action, PHP_URL_HOST);
+		$parse_results = parse_url($request_service_url, PHP_URL_HOST);
 		if (empty($parse_results)) {
 			// login transaction gave a relative path for this action
-			$request_url = $this->server_protocol.'://'.$this->server_hostname.':'.$this->server_port.''.$action;
+			$request_url = $this->server_protocol.'://'.$this->server_hostname.':'.$this->server_port.''.$request_service_url;
 		}
 		else {
 			// login transaction gave an absolute path for this action
-			$request_url = $action;
+			$request_url = $request_service_url;
 		}
 
 		// build query string from arguments
@@ -1668,7 +1646,7 @@ class phRETS {
 			$request_arguments = http_build_query($parameters);
 		}
 
-		// build entire URL if needed
+		// append URL query arguments if necessary
 		if (!empty($request_arguments)) {
 			$request_url = $request_url .'?'. $request_arguments;
 		}
@@ -1692,23 +1670,26 @@ class phRETS {
 		}
 
 		$this->last_request_url = $request_url;
-		curl_setopt($this->ch, CURLOPT_URL, $request_url);
 
-		curl_setopt($this->ch, CURLOPT_HTTPHEADER, array(trim($request_headers)));
-		// do it
-		$response_body = curl_exec($this->ch);
-		$response_code = curl_getinfo($this->ch, CURLINFO_HTTP_CODE);
+		//cURL		
+		$this->initialize_curl();
+		curl_setopt($this->curl_handle, CURLOPT_URL, $request_url);
+		curl_setopt($this->curl_handle, CURLOPT_HTTPHEADER, array(trim($request_headers)));
+		$this->last_response_body = curl_exec($this->curl_handle);
 
-		if ($this->debug_mode == true) {
-			fwrite($this->debug_log, $response_body ."\n");
+		
+		$response_code = curl_getinfo($this->curl_handle, CURLINFO_HTTP_CODE);
+		if (200 !== $response_code) {
+			throw new retsException('HTTP Error. Response code: '.$response_code . $this->last_response_body, $response_code);
+		}
+		
+		if ($this->debug_mode == true && ! empty($this->last_response_body) && $this->debug_file_handle) {
+			fwrite($this->debug_file_handle, $this->last_response_body ."\n");
 		}
 
 		if ($this->catch_last_response == true) {
-			$this->last_server_response = $this->last_response_headers_raw . $response_body;
+			$this->last_server_response = $this->last_response_headers_raw . $this->last_response_body;
 		}
-
-		//Set this for future use
-		$this->last_response_body = $response_body;
 
 		if (isset($this->last_response_headers['WWW-Authenticate'])) {
 			if (strpos($this->last_response_headers['WWW-Authenticate'], 'Basic') !== false) {
@@ -1732,14 +1713,8 @@ class phRETS {
 				$this->session_id = $matches[1];
 			}
 		}
-
-		if ($response_code != 200) {
-			$this->set_error_info("http", $response_code, $response_body);
-			return false;
-		}
-
 		// return raw headers and body
-		return array($this->last_response_headers_raw, $response_body);
+		return array($this->last_response_headers_raw, $this->last_response_body);
 	}
 
 
@@ -1775,35 +1750,11 @@ class phRETS {
 	}
 
 	/**
-	 * Gets the current error
-	 * @return mixed false on no error, array error message if there is an error
+	 * encapsulates rets server version polymorphisms 
+	 * @param string $check_version 1_5_or_below or 1_7_or_higher
+	 * @return boolean
 	 */
-	public function Error() {
-		if (isset($this->error_info['type']) && !empty($this->error_info['type'])) {
-			return $this->error_info;
-		} else {
-			return false;
-		}
-	}
-
-
-	private function set_error_info($type, $code, $text) {
-		$this->error_info['type'] = $type;
-		$this->error_info['code'] = $code;
-		$this->error_info['text'] = $text;
-		return true;
-	}
-
-
-	private function reset_error_info() {
-		$this->error_info['type'] = "";
-		$this->error_info['code'] = "";
-		$this->error_info['text'] = "";
-		return true;
-	}
-
-
-	private function is_server_version($check_version) {
+	public function is_server_version($check_version) {
 		if ($check_version == "1_5_or_below") {
 			if ($this->GetServerVersion() == "RETS/1.5" || $this->GetServerVersion() == "RETS/1.0") {
 				return true;
@@ -1840,15 +1791,6 @@ class phRETS {
 	}
 
 
-	public function ServerDetail($detail) {
-		if (isset($this->server_information[$detail])) {
-			return $this->server_information[$detail];
-		}
-		else {
-			return "";
-		}
-	}
-
 	/**
 	 * Public interface for setting class variables
 	 * @param string $name name of setting. Values include:
@@ -1867,6 +1809,7 @@ class phRETS {
 			case "debug_file":
 				$this->debug_file = $value;
 				break;
+			case 'debug':
 			case "debug_mode":
 				$this->debug_mode = $value;
 				break;
@@ -1898,9 +1841,9 @@ class phRETS {
 				$this->override_offset_protection = $value;
 				break;
 			default:
-				return false;
+				throw new retsException('Unknown param name: '. $name);
+				break;
 		}
-
 		return true;
 	}
 
