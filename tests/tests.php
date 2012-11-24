@@ -6,7 +6,7 @@ class tests extends PHPUnit_Framework_TestCase {
 	private $username;
 	function setUp() {
 		//Credentials should be in CSV format of url,password,username
-// 		error_reporting(E_ALL);
+		error_reporting(E_ALL);
 		$fh = fopen('credentials.csv', 'r');
 		$login = fgetcsv($fh);
 		$this->url = $login[0];
@@ -14,7 +14,28 @@ class tests extends PHPUnit_Framework_TestCase {
 		$this->username = $login[2];
 		$this->instance = new phRETS($this->url, $this->username, $this->password);
 		$this->instance->SetParam('compression_enabled', true);
+		$this->instance->SetParam('debug_file', 'test');
 		$this->instance->SetParam('debug', true);
+		$this->instance->SetParam('force_ua_authentication', true);
+		$this->instance->SetParam('disable_follow_location', true);
+		$this->instance->SetParam('force_basic_authentication', true);
+		$this->instance->SetParam('use_interealty_ua_auth', true);
+		$this->instance->SetParam('disable_encoding_fix', true);
+		$this->instance->SetParam('override_offset_protection', true);
+		$this->instance->SetParam('offset_support', false);
+	}
+	
+	function testConnected() {
+		$this->assertTrue($this->instance->is_connected());
+	}
+	/**
+	 * @covers phRETS::getLookupValues
+	 */
+	function  testgetLookupValues() {
+		$this->assertTrue(is_array($this->instance->GetLookupValues('property', 'yesno')));
+	}
+	function  testGetMetaDataTable() {
+		$this->assertTrue(is_array($this->instance->GetMetadataTable('property', '4')));
 	}
 	function testFirewallTest () {
 		$this->assertNotEmpty($this->instance->get_firewall_messages());
@@ -22,7 +43,7 @@ class tests extends PHPUnit_Framework_TestCase {
 	}
 	function  testAuthTypeSupport() {
 		$this->assertFalse($this->instance->is_auth_type_supported('digest'));
-		$this->assertFalse($this->instance->is_auth_type_supported('basic')); 
+		$this->assertFalse($this->instance->is_auth_type_supported('basic'));
 	}
 	/**
 	 * @expectedException phRETSException
@@ -36,6 +57,34 @@ class tests extends PHPUnit_Framework_TestCase {
 	 */
 	function  testFailedLogin () {
 		new phRETS($this->url, '1234', '1234');
+	}
+	function  testGetMetadata() {
+		$data = $this->instance->GetMetadata('property', '4');
+		$this->assertTrue(is_array($data));
+		$this->assertNotEmpty($data);
+	}
+	function testGetMetaDataTypes() {
+		$types = $this->instance->GetMetadataTypes();
+		$this->assertTrue(is_array($types));
+		$this->assertNotEmpty($types);
+	}
+	function  testgetMetaDataObjects() {
+		$objects = $this->instance->GetMetadataObjects('property');
+		$this->assertTrue(is_array($objects));
+		$this->assertNotEmpty($objects);
+	}
+	/**
+	 * @expectedException retsException
+	 */
+	function  testSetUnknownParam() {
+		$this->instance->SetParam('unknowmn', false);
+	}
+	
+	function  testFreeResult() {
+		$this->assertFalse($this->instance->getLastSearchId());
+		$this->instance->Search('property', '4', $this->instance->PrepareQuery(array('176'=>'100000-120000')), array('Limit'=>1, 'Select'=>176));
+		$this->assertTrue($this->instance->FreeResult($this->instance->getLastSearchId()));
+		$this->assertFalse($this->instance->FreeResult(99));
 	}
 	/**
 	 * test success on good search
@@ -53,6 +102,7 @@ class tests extends PHPUnit_Framework_TestCase {
 	 * when there is no search data
 	 */
 	function  testFalseOnNoSearch() {
+		$this->assertFalse($this->instance->FetchRow(99));
 		$this->assertFalse($this->instance->getTotalRecordsFound());
 		$this->assertFalse($this->instance->getNumRows());
 		$this->assertFalse($this->instance->IsMaxrowsReached());
@@ -80,8 +130,8 @@ class tests extends PHPUnit_Framework_TestCase {
 		$this->assertNotEmpty($this->username);
 	}
 	function testUAandQuery () {
-		$this->assertInstanceOf('phRETS', 
-			new phRETS($this->url.'?query=string', $this->username, $this->password, '3453125')
+		$this->assertInstanceOf('phRETS',
+				new phRETS($this->url.'?query=string', $this->username, $this->password, '3453125')
 		);
 	}
 	function testCapabilityChecker() {
@@ -94,6 +144,27 @@ class tests extends PHPUnit_Framework_TestCase {
 		$prepared_query = $this->instance->PrepareQuery($query);
 		$this->assertStringStartsWith('(', $prepared_query);
 		$this->assertStringEndsWith(')', $prepared_query);
+	}
+	function  testGetObject() {
+		$search = $this->instance->Search('property', '4', $this->instance->PrepareQuery(array('176'=>'100000-120000')), array('Limit'=>2, 'Select'=>'sysid'));
+		$sysid = $search[0]['sysid'];
+		//default implementation
+		$obj = $this->instance->GetObject('property', 'photo', $sysid);
+		$this->assertTrue(is_array($obj));
+		//get 1 photo
+		$single = $this->instance->GetObject('property', 'photo', $sysid, 1);
+		$this->assertTrue(is_array($single));
+		$this->assertTrue($single[0]['Success']);
+		//get multiple photos by csv
+		$select = $this->instance->GetObject('property', 'photo', $sysid, '1,2,3');
+		$this->assertTrue(is_array($select));
+		$this->assertTrue($select[0]['Success']);
+		//get multiple properties
+		$multiple_ids = $sysid.','.$search[1]['sysid'];
+		$properties = $this->instance->GetObject('property', 'photo', $multiple_ids);
+	}
+	function  testGetAllLookupValues() {
+		$this->assertTrue(is_array($this->instance->GetAllLookupValues('property')));
 	}
 	/**
 	 * @covers phRETS::getMetadataResources()
@@ -118,24 +189,11 @@ class tests extends PHPUnit_Framework_TestCase {
 		$this->assertArrayHasKey('Comments', $info);
 		$software = $this->instance->GetServerSoftware();
 	}
-	function testNotConnected() {
-		$this->markTestIncomplete();
-		$this->assertFalse($this->instance->is_connected());
-	}
-	function testConnect() {
-		$this->markTestIncomplete();
-		$this->assertTrue($this->instance->connect());
-	}
-	function testConnected() {
-		$this->markTestIncomplete();
-		$this->instance->connect();
-		$this->assertTrue($this->instance->is_connected());
-	}
-	function  testFreeResult() {
-		$this->instance->FreeResult(1);
-	}
 	function  testDisconnect() {
 		$this->assertTrue($this->instance->Disconnect());
+	}
+	function testNotConnected() {
+		$this->assertFalse($this->instance->is_connected());
 	}
 }
 

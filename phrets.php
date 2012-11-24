@@ -44,12 +44,13 @@ class phRETS {
 	private $server_protocol;
 	private $server_version;
 	private $server_software;
+	private $search_data;
 	private $static_headers = array();
 	private $server_information = array();
 	private $cookie_file = "";
 	private $debug_file = "rets_debug.txt";
 	private $debug_file_handle = false;
-	private $debug_mode;
+	private $debug_mode = FALSE;
 	private $allowed_capabilities = array(
 			"Action" => 1,
 			"ChangePassword" => 1,
@@ -80,7 +81,6 @@ class phRETS {
 	private $use_interealty_ua_auth = false;
 	private $int_result_pointer = 0;
 	private $last_request_url;
-	private $last_server_response;
 	private $session_id;
 	private $catch_last_response = false;
 	private $disable_encoding_fix = false;
@@ -96,6 +96,7 @@ class phRETS {
 	private $username;
 	private $password;
 	private $login_url;
+	private $xml;
 	/**
 	 * required php modules / capabilites
 	 * @var array
@@ -108,9 +109,6 @@ class phRETS {
 	/**
 	 * connect to the remote server, and log in 
 	 */
-	public function connect () {
-		return false;
-	}
 	public function __construct($login_url, $username, $password, $ua_pwd = "") {
 	
 		$this->username = $username;
@@ -161,35 +159,29 @@ class phRETS {
 		$this->initialize_curl();
 		// make request to Login transaction
 		
-		$result =  $this->RETSRequest($this->service_urls['Login']);
-	
-		list($headers,$body) = $result;
-		
-		// parse body response
-		$xml = $this->ParseXMLResponse($body);
-		
-		// log replycode and replytext for reference later
-		$this->last_request['ReplyCode'] = "{$xml['ReplyCode']}";
-		$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
+		$this->RETSRequest($this->service_urls['Login']);
+		$this->ParseXMLResponse($this->last_response_body);
+		$this->save_last_request();
 		
 		// chop up login response
 		// if multiple parts of the login response aren't found splitting on \r\n, redo using just \n
 		$login_response = array();
 		
-		if ($this->server_version == "RETS/1.0") {
+		if ($this->is_server_version('1_0')) {
 			//@codeCoverageIgnoreStart
-			if (isset($xml)) {
-			$login_response = explode("\r\n", $xml);
+			//@todo test on rets 1.0 
+			if (isset($this->xml)) {
+			$login_response = explode("\r\n", $this->xml);
 				if (empty($login_response[3])) {
-					$login_response = explode("\n", $xml);
+					$login_response = explode("\n", $this->xml);
 				}
 			}
-			//@codeCoverageIgnoreEnd
 		} else {
-			if (isset($xml->{'RETS-RESPONSE'})) {
-				$login_response = explode("\r\n", $xml->{'RETS-RESPONSE'});
+			//@codeCoverageIgnoreEnd
+			if (isset($this->xml->{'RETS-RESPONSE'})) {
+				$login_response = explode("\r\n", $this->xml->{'RETS-RESPONSE'});
 				if (empty($login_response[3])) {
-				$login_response = explode("\n", $xml->{'RETS-RESPONSE'});
+				$login_response = explode("\n", $this->xml->{'RETS-RESPONSE'});
 				}
 			}
 		}
@@ -220,6 +212,7 @@ class phRETS {
 		}
 		
 		if ($this->last_request['ReplyCode'] == 0) {
+			$this->is_connected = true;
 			return true;
 		} else {
 			throw new retsException($this->last_request['ReplyText'], $this->last_request['ReplyCode']);
@@ -239,7 +232,7 @@ class phRETS {
 				CURLOPT_SSL_VERIFYPEER => false,
 				CURLOPT_SSL_VERIFYHOST => false,
 				CURLOPT_HEADER => false,
-				CURLOPT_TIMEOUT => 10,
+				CURLOPT_TIMEOUT => 0,
 				CURLOPT_COOKIEFILE => $this->cookie_file,
 				CURLOPT_RETURNTRANSFER => true,
 				CURLOPT_USERPWD => $this->username.":".$this->password,
@@ -266,9 +259,6 @@ class phRETS {
 		curl_setopt_array($this->curl_handle, $curl_options);
 	}
 
-	public function GetLastServerResponse() {
-		return $this->last_server_response;
-	}
 	/**
 	 * @codeCoverageIgnore
 	 * @deprecated use test_firewall
@@ -400,22 +390,6 @@ class phRETS {
 		
 		$return_photos = array();
 
-		if (empty($resource)) {
-			$this->fail("Resource parameter is required for GetObject() request.");
-			return false;
-		}
-		if (empty($type)) {
-			$this->fail("Type parameter is required for GetObject() request.");
-			return false;
-		}
-		if (empty($id)) {
-			$this->fail("ID parameter is required for GetObject() request.");
-			return false;
-		}
-		if (empty($this->service_urls['GetObject'])) {
-			$this->fail("GetObject() called but unable to find GetObject location.  Failed login?");
-			return false;
-		}
 
 		$send_id = "";
 		$send_numb = "";
@@ -443,7 +417,6 @@ class phRETS {
 		else {
 			$send_numb = trim($photo_number);
 		}
-
 		if (strpos($id, ',') !== false) {
 			// id contains multiple objects.
 			// chopping and combining with photo_number
@@ -457,11 +430,9 @@ class phRETS {
 				}
 			}
 			$send_id = preg_replace('/\,$/', '', $send_id);
-		}
-		else {
+		} else {
 			$send_id = trim($id).':'.$send_numb;
 		}
-
 		// make request
 		$location_int = $location ? 1 : 0; 
 		$result = $this->RETSRequest($this->service_urls['GetObject'],
@@ -472,11 +443,6 @@ class phRETS {
 								'Location' => $location_int
 								)
 						);
-
-		if (!$result) {
-			return false;
-		}
-		list($headers, $body) = $result;
 
 		// fix case issue if exists
 		if (isset($this->last_response_headers['Content-type']) && !isset($this->last_response_headers['Content-Type'])) {
@@ -491,14 +457,13 @@ class phRETS {
 		if (strpos($this->last_response_headers['Content-Type'], 'multipart') !== false) {
 
 			// help bad responses be more multipart compliant
-			$body = "\r\n{$body}\r\n";
+			$this->last_response_body = "\r\n{$this->last_response_body}\r\n";
 
 			// multipart
 			preg_match('/boundary\=\"(.*?)\"/', $this->last_response_headers['Content-Type'], $matches);
 			if (isset($matches[1])) {
 				$boundary = $matches[1];
-			}
-			else {
+			} else {
 				preg_match('/boundary\=(.*?)(\s|$|\;)/', $this->last_response_headers['Content-Type'], $matches);
 				$boundary = $matches[1];
 			}
@@ -506,13 +471,13 @@ class phRETS {
 			$boundary = preg_replace('/^\"(.*?)\"$/', '\1', $boundary);
 
 			// clean up the body to remove a reamble and epilogue
-			$body = preg_replace('/^(.*?)\r\n--'.$boundary.'\r\n/', "\r\n--{$boundary}\r\n", $body);
+			$this->last_response_body = preg_replace('/^(.*?)\r\n--'.$boundary.'\r\n/', "\r\n--{$boundary}\r\n", $this->last_response_body);
 			// make the last one look like the rest for easier parsing
-			$body = preg_replace('/\r\n--'.$boundary.'--/', "\r\n--{$boundary}\r\n", $body);
+			$this->last_response_body = preg_replace('/\r\n--'.$boundary.'--/', "\r\n--{$boundary}\r\n", $this->last_response_body);
 
 			// cut up the message
 			$multi_parts = array();
-			$multi_parts = explode("\r\n--{$boundary}\r\n", $body);
+			$multi_parts = explode("\r\n--{$boundary}\r\n", $this->last_response_body);
 			// take off anything that happens before the first boundary (the preamble)
 			array_shift($multi_parts);
 			// take off anything after the last boundary (the epilogue)
@@ -580,25 +545,23 @@ class phRETS {
 
 				if (strpos($this_photo['Content-Type'], 'xml') !== false) {
 					// this multipart might include a RETS error
-					$xml = $this->ParseXMLResponse($this_photo['Data']);
+					$this->ParseXMLResponse($this_photo['Data']);
 
-					if ($xml['ReplyCode'] == 0 || empty($this_photo['Data'])) {
+					if ($this->xml['ReplyCode'] == 0 || empty($this_photo['Data'])) {
 						// success but no body
 						$this_photo['Success'] = true;
-					}
-					else {
+					} else {
 						// RETS error in this multipart section
 						$this_photo['Success'] = false;
-						$this_photo['ReplyCode'] = "{$xml['ReplyCode']}";
-						$this_photo['ReplyText'] = "{$xml['ReplyText']}";
+						$this_photo['ReplyCode'] = "{$this->xml['ReplyCode']}";
+						$this_photo['ReplyText'] = "{$this->xml['ReplyText']}";
 					}
 				}
 
 				// add information about this multipart to the returned array
 				$return_photos[] = $this_photo;
 			}
-		}
-		else {
+		} else {
 			// all we know is that the response wasn't a multipart so it's either a single photo or error
 			$this_photo = array();
 
@@ -634,24 +597,21 @@ class phRETS {
 				$this_photo['Content-Description'] = $this->last_response_headers['Content-Description'];
 			}
 
-			$this_photo['Length'] = strlen($body);
-			$this_photo['Data'] = $body;
+			$this_photo['Length'] = strlen($this->last_response_body);
+			$this_photo['Data'] = $this->last_response_body;
 
 			if (isset($this->last_response_headers['Content-Type'])) {
 				if (strpos($this->last_response_headers['Content-Type'], 'xml') !== false) {
 					// RETS error maybe?
-					$xml = $this->ParseXMLResponse($body);
+					$this->ParseXMLResponse($this->last_response_body);
 
-					if ($xml['ReplyCode'] == 0 || empty($body)) {
+					if ($this->xml['ReplyCode'] == 0 || empty($body)) {
 						// false alarm.  we're good
 						$this_photo['Success'] = true;
-					}
-					else {
+					} else {
 						// yes, RETS error
-						$this->last_request['ReplyCode'] = "{$xml['ReplyCode']}";
-						$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
-						$this_photo['ReplyCode'] = "{$xml['ReplyCode']}";
-						$this_photo['ReplyText'] = "{$xml['ReplyText']}";
+						$this_photo['ReplyCode'] = "{$this->xml['ReplyCode']}";
+						$this_photo['ReplyText'] = "{$this->xml['ReplyText']}";
 						$this_photo['Success'] = false;
 					}
 				}
@@ -727,7 +687,7 @@ class phRETS {
 
 	
 	public function FreeResult($pointer_id) {
-		if (!empty($pointer_id)) {
+		if (!empty($pointer_id) && isset($this->search_data[$pointer_id])) {
 			unset($this->search_data[$pointer_id]['data']);
 			unset($this->search_data[$pointer_id]['delimiter_character']);
 			unset($this->search_data[$pointer_id]['column_names']);
@@ -840,33 +800,26 @@ class phRETS {
 			}
 
 			// make request
-			$result = $this->RETSRequest($this->service_urls['Search'], $search_arguments);
-			list($headers, $body) = $result;
+			$this->RETSRequest($this->service_urls['Search'], $search_arguments);
+			$body = $this->fix_encoding($this->last_response_body);
 
-			$body = $this->fix_encoding($body);
-
-			$xml = $this->ParseXMLResponse($body);
-
+			$this->ParseXMLResponse($body);
+			$this->save_last_request();
 			// log replycode and replytext for reference later
-			$this->last_request['ReplyCode'] = "{$xml['ReplyCode']}";
-			$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
+			
 
-			if ($xml['ReplyCode'] != 0) {
-				throw new retsException($xml['ReplyText'], $xml['ReplyCode']);				
-			}
-
-			if (isset($xml->DELIMITER)) {
+			if (isset($this->xml->DELIMITER)) {
 				// delimiter found so we have at least a COLUMNS row to parse
-				$delimiter_character = chr("{$xml->DELIMITER->attributes()->value}");
+				$delimiter_character = chr("{$this->xml->DELIMITER->attributes()->value}");
 				$this->search_data[$this->int_result_pointer]['delimiter_character'] = $delimiter_character;
-				$column_names = "{$xml->COLUMNS[0]}";
+				$column_names = "{$this->xml->COLUMNS[0]}";
 				$column_names = preg_replace("/^{$delimiter_character}/", "", $column_names);
 				$column_names = preg_replace("/{$delimiter_character}\$/", "", $column_names);
 				$this->search_data[$this->int_result_pointer]['column_names'] = explode($delimiter_character, $column_names);
 			}
 
-			if (isset($xml->DATA)) {
-				foreach ($xml->DATA as $key) {
+			if (isset($this->xml->DATA)) {
+				foreach ($this->xml->DATA as $key) {
 					$field_data = "{$key}";
 					// split up DATA row on delimiter found earlier
 					$this->search_data[$this->int_result_pointer]['data'][] = $field_data;
@@ -874,20 +827,16 @@ class phRETS {
 				}
 			}
 
-			if (isset($xml->MAXROWS)) {
+			if (isset($this->xml->MAXROWS)) {
 				// MAXROWS tag found.  the RETS server withheld records.
 				// if the server supports Offset, more requests can be sent to page through results
 				// until this tag isn't found anymore.
 				$this->search_data[$this->int_result_pointer]['maxrows_reached'] = true;
 			}
 
-			if (isset($xml->COUNT)) {
+			if (isset($this->xml->COUNT)) {
 				// found the record count returned.  save it
-				$this->search_data[$this->int_result_pointer]['total_records_found'] = "{$xml->COUNT->attributes()->Records}";
-			}
-
-			if (isset($xml)) {
-				unset($xml);
+				$this->search_data[$this->int_result_pointer]['total_records_found'] = "{$this->xml->COUNT->attributes()->Records}";
 			}
 
 			if ($this->IsMaxrowsReached($this->int_result_pointer) && $this->offset_support) {
@@ -919,6 +868,9 @@ class phRETS {
 
 		return $data_table;
 	}
+	public function getLastSearchId() {
+		return $this->int_result_pointer == 0 ? false : $this->int_result_pointer;
+	}
 
 /**
  * Gets all of the lookup values for the selected resource
@@ -926,19 +878,8 @@ class phRETS {
  * @return array $values 
  */
 	public function GetAllLookupValues($resource) {
-		
 
-		if (empty($resource)) {
-			$this->fail("Resource parameter is required in GetAllLookupValues() request.");
-			return false;
-		}
-		if (empty($this->service_urls['GetMetadata'])) {
-			$this->fail("GetAllLookupValues() called but unable to find GetMetadata location.  Failed login?");
-			return false;
-		}
-
-		// make request
-		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
+		$this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
 								'Type' => 'METADATA-LOOKUP_TYPE',
 								'ID' => $resource.':*',
@@ -946,31 +887,18 @@ class phRETS {
 								)
 						);
 
-		if (!$result) {
-			return false;
-		}
-		list($headers, $body) = $result;
-
-		$xml = $this->ParseXMLResponse($body);
-		if (!$xml) {
-			return false;
-		}
-
-		if ($xml['ReplyCode'] != 0) {
-			throw new retsException($xml['ReplyText'], $xml['ReplyCode']);
-		}
+		$this->ParseXMLResponse($this->last_response_body);
 
 		$this_table = array();
 
-		// parse XML into a nice array
-		if ($xml->METADATA && $xml->METADATA->{'METADATA-LOOKUP_TYPE'}) {
+		if ($this->xml->METADATA && $this->xml->METADATA->{'METADATA-LOOKUP_TYPE'}) {
 
-			foreach ($xml->METADATA->{'METADATA-LOOKUP_TYPE'} as $key) {
+			foreach ($this->xml->METADATA->{'METADATA-LOOKUP_TYPE'} as $key) {
 				if (!empty($key->attributes()->Lookup)) {
 					$this_lookup = array();
 
 					$lookup_xml_array = array();
-					if (($this->server_version == "RETS/1.7.2") || ($this->server_version == "RETS/1.8")) {
+					if ($this->is_server_version('1_7_or_above')) {
 						$lookup_xml_array = $key->LookupType;
 					} else {
 						$lookup_xml_array = $key->Lookup;
@@ -1010,55 +938,25 @@ class phRETS {
  * @param string $lookupname metadata LookupName
  */
 	public function GetLookupValues($resource, $lookupname) {
-		
-
-		if (empty($resource)) {
-			$this->fail("Resource parameter is required in GetLookupValues() request.");
-			return false;
-		}
-		if (empty($lookupname)) {
-			$this->fail("Lookup Name parameter is required in GetLookupValues() request.");
-			return false;
-		}
-		if (empty($this->service_urls['GetMetadata'])) {
-			$this->fail("GetLookupValues() called but unable to find GetMetadata location.  Failed login?");
-			return false;
-		}
-
-		// make request
-		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
+		$this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
 								'Type' => 'METADATA-LOOKUP_TYPE',
 								'ID' => $resource.':'.$lookupname,
 								'Format' => 'STANDARD-XML'
 								)
 						);
-
-		if (!$result) {
-			return false;
-		}
-		list($headers, $body) = $result;
-
-		$xml = $this->ParseXMLResponse($body);
-		if (!$xml) {
-			return false;
-		}
-
-		if ($xml['ReplyCode'] != 0) {
-			throw new retsException($xml['ReplyText'], $xml['ReplyCode']);
-		}
+		$this->ParseXMLResponse($this->last_response_body);
 
 		$this_table = array();
-
 		// parse XML into a nice array
-		if ($xml->METADATA && $xml->METADATA->{'METADATA-LOOKUP_TYPE'}) {
+		if ($this->xml->METADATA && $this->xml->METADATA->{'METADATA-LOOKUP_TYPE'}) {
 
 			$lookup_xml_array = array();
-			if (($this->server_version == "RETS/1.7.2") || ($this->server_version == "RETS/1.8")) {
-				$lookup_xml_array = $xml->METADATA->{'METADATA-LOOKUP_TYPE'}->LookupType;
+			if ($this->is_server_version('1_7_or_above')) {
+				$lookup_xml_array = $this->xml->METADATA->{'METADATA-LOOKUP_TYPE'}->LookupType;
 			}
 			else {
-				$lookup_xml_array = $xml->METADATA->{'METADATA-LOOKUP_TYPE'}->Lookup;
+				$lookup_xml_array = $this->xml->METADATA->{'METADATA-LOOKUP_TYPE'}->Lookup;
 			}
 
 			if (is_object($lookup_xml_array)) {
@@ -1100,17 +998,15 @@ class phRETS {
 								)
 						);
 
-		list($headers, $body) = $result;
-
-		$xml = $this->ParseXMLResponse($body);
+		$this->ParseXMLResponse($this->last_response_body);
 
 		
 
 		$this_resource = array();
 
 		// parse XML into a nice array
-		if ($xml->METADATA) {
-			foreach ($xml->METADATA->{'METADATA-RESOURCE'}->Resource as $key => $value) {
+		if ($this->xml->METADATA) {
+			foreach ($this->xml->METADATA->{'METADATA-RESOURCE'}->Resource as $key => $value) {
 				$this_resource["{$value->ResourceID}"] = array(
 						'ResourceID' => "{$value->ResourceID}",
 						'StandardName'=>"{$value->StandardName}",
@@ -1159,22 +1055,7 @@ class phRETS {
 	 * @see phRETS::GetMetadataClasses();
 	 */
 	public function GetMetadataTable($resource, $class) {
-		
-
 		$id = $resource.':'.$class;
-		if (empty($resource)) {
-			$this->fail("Resource parameter is required in GetMetadata() request.");
-			return false;
-		}
-		if (empty($class)) {
-			$this->fail("Class parameter is required in GetMetadata() request.");
-			return false;
-		}
-		if (empty($this->service_urls['GetMetadata'])) {
-			$this->fail("GetMetadataTable() called but unable to find GetMetadata location.  Failed login?");
-			return false;
-		}
-
 		// request specific metadata
 		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
@@ -1184,29 +1065,13 @@ class phRETS {
 								)
 						);
 
-		if (!$result) {
-			return false;
-		}
-		list($headers, $body) = $result;
-
-		$xml = $this->ParseXMLResponse($body);
-		if (!$xml) {
-			return false;
-		}
-
-		// log replycode and replytext for reference later
-		$this->last_request['ReplyCode'] = "{$xml['ReplyCode']}";
-		$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
-
-		if ($xml['ReplyCode'] != 0) {
-			throw new retsException($xml['ReplyText'], $xml['ReplyCode']);
-		}
+		$this->ParseXMLResponse($this->last_response_body);
 
 		$this_table = array();
 
 		// parse XML into a nice array
-		if ($xml->METADATA) {
-			foreach ($xml->METADATA->{'METADATA-TABLE'}->Field as $key) {
+		if ($this->xml->METADATA) {
+			foreach ($this->xml->METADATA->{'METADATA-TABLE'}->Field as $key) {
 				$this_table[] = array(
 						'SystemName' => "{$key->SystemName}",
 						'StandardName' => "{$key->StandardName}",
@@ -1246,58 +1111,28 @@ class phRETS {
 
 
 	public function GetMetadata($resource, $class) {
-		if (empty($this->service_urls['GetMetadata'])) {
-			$this->fail("GetMetadata() called but unable to find GetMetadata location.  Failed login?");
-			return false;
-		}
 		return $this->GetMetadataTable($resource, $class);
 	}
 
-
-	public function GetMetadataObjects($id) {
+	/**
+ 	* 	request basic metadata information 
+ 	*/
+	public function GetMetadataObjects($resource) {
 		
-
-		if (empty($id)) {
-			$this->fail("ID parameter is required in GetMetadataObjects() request.");
-			return false;
-		}
-		if (empty($this->service_urls['GetMetadata'])) {
-			$this->fail("GetMetadataObjects() called but unable to find GetMetadata location.  Failed login?");
-			return false;
-		}
-
-		// request basic metadata information
 		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
 								'Type' => 'METADATA-OBJECT',
-								'ID' => $id,
+								'ID' => $resource,
 								'Format' => 'STANDARD-XML'
 								)
 						);
 
-		if (!$result) {
-			return false;
-		}
-		list($headers, $body) = $result;
-
-		$xml = $this->ParseXMLResponse($body);
-		if (!$xml) {
-			return false;
-		}
-
-		// log replycode and replytext for reference later
-		$this->last_request['ReplyCode'] = "{$xml['ReplyCode']}";
-		$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
-
-		if ($xml['ReplyCode'] != 0) {
-			throw new retsException($xml['ReplyText'], $xml['ReplyCode']);
-		}
-
+		$this->ParseXMLResponse($this->last_response_body);
 		$return_data = array();
 
-		if (isset($xml->METADATA->{'METADATA-OBJECT'})) {
+		if (isset($this->xml->METADATA->{'METADATA-OBJECT'})) {
 			// parse XML into a nice array
-			foreach ($xml->METADATA->{'METADATA-OBJECT'} as $key => $value) {
+			foreach ($this->xml->METADATA->{'METADATA-OBJECT'} as $key => $value) {
 				foreach ($value->Object as $key) {
 					if (!empty($key->ObjectType)) {
 						$return_data[] = array(
@@ -1325,7 +1160,7 @@ class phRETS {
 	 */
 	public function GetMetadataClasses($id) {
 		// request basic metadata information
-		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
+		$this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
 								'Type' => 'METADATA-CLASS',
 								'ID' => $id,
@@ -1333,23 +1168,13 @@ class phRETS {
 								)
 						);
 
-		list($headers, $body) = $result;
-
-		$xml = $this->ParseXMLResponse($body);
-
-		// log replycode and replytext for reference later
-		$this->last_request['ReplyCode'] = "{$xml['ReplyCode']}";
-		$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
-
-		if ($xml['ReplyCode'] != 0) {
-			throw new retsException($xml['ReplyText'], $xml['ReplyCode']);
-		}
-
+		$this->ParseXMLResponse($this->last_response_body);
+		
 		$return_data = array();
 
 		// parse XML into a nice array
-		if ($xml->METADATA) {
-			foreach ($xml->METADATA->{'METADATA-CLASS'} as $key => $value) {
+		if ($this->xml->METADATA) {
+			foreach ($this->xml->METADATA->{'METADATA-CLASS'} as $key => $value) {
 				foreach ($value->Class as $key) {
 					if (!empty($key->ClassName)) {
 						$return_data[] = array(
@@ -1376,45 +1201,24 @@ class phRETS {
 	}
 
 
+	/**
+	 * request basic metadata information
+	 */		
 	public function GetMetadataTypes($id = 0) {
-		
-
-		if (empty($this->service_urls['GetMetadata'])) {
-			$this->fail("GetMetadataTypes() called but unable to find GetMetadata location.  Failed login?");
-			return false;
-		}
-
-		// request basic metadata information
-		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
+		$this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
 								'Type' => 'METADATA-CLASS',
 								'ID' => $id,
 								'Format' => 'STANDARD-XML'
 								)
 						);
-
-		if (!$result) {
-			return false;
-		}
-		list($headers, $body) = $result;
-		$xml = $this->ParseXMLResponse($body);
-		if (!$xml) {
-			return false;
-		}
-
-		// log replycode and replytext for reference later
-		$this->last_request['ReplyCode'] = "{$xml['ReplyCode']}";
-		$this->last_request['ReplyText'] = "{$xml['ReplyText']}";
-
-		if ($xml['ReplyCode'] != 0) {
-			throw new retsException($xml['ReplyText'], $xml['ReplyCode']);
-		}
-
+		$this->ParseXMLResponse($this->last_response_body);
+		
 		$return_data = array();
 
 		// parse XML into a nice array
-		if ($xml->METADATA) {
-			foreach ($xml->METADATA->{'METADATA-CLASS'} as $key => $value) {
+		if ($this->xml->METADATA) {
+			foreach ($this->xml->METADATA->{'METADATA-CLASS'} as $key => $value) {
 				$resource = $value['Resource'];
 				$this_resource = array();
 				foreach ($value->Class as $key) {
@@ -1467,42 +1271,12 @@ class phRETS {
 	}
 
 	/**
-	 * read through service_urlss read during the Login and return
-	 * @return array $transactions
-	 */
-	public function GetAllTransactions() {
-		$transactions = array();
-		if (is_array($this->service_urls)) {
-			foreach ($this->service_urls as $key => $value) {
-				$transactions[] = $key;
-			}
-		}
-		return $transactions;
-	}
-
-	/**
-	 * @return string url
-	 */
-	public function LastRequestURL() {
-		return $this->last_request_url;
-	}
-
-
-	
-/**
 	 * Gets server info
 	 * @return array $info
 	 */
 	public function GetServerInformation() {
 		
-
-		if (empty($this->service_urls['GetMetadata'])) {
-			$this->fail("GetServerInformation() called but unable to find GetMetadata location.  Failed login?");
-			return false;
-		}
-
-		// request server information
-		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
+		$this->RETSRequest($this->service_urls['GetMetadata'],
 						array(
 								'Type' => 'METADATA-SYSTEM',
 								'ID' => 0,
@@ -1510,39 +1284,38 @@ class phRETS {
 								)
 						);
 
-		list($headers, $body) = $result;
 
-		$xml = $this->ParseXMLResponse($body);
+		$this->ParseXMLResponse($this->last_response_body);
 
 		$system_id = "";
 		$system_description = "";
 		$system_comments = "";
 
 		if ($this->is_server_version("1_5_or_below")) {
-			if (isset($xml->METADATA->{'METADATA-SYSTEM'}->System->SystemID)) {
-				$system_id = "{$xml->METADATA->{'METADATA-SYSTEM'}->System->SystemID}";
+			if (isset($this->xml->METADATA->{'METADATA-SYSTEM'}->System->SystemID)) {
+				$system_id = "{$this->xml->METADATA->{'METADATA-SYSTEM'}->System->SystemID}";
 			}
-			if (isset($xml->METADATA->{'METADATA-SYSTEM'}->System->SystemDescription)) {
-				$system_description = "{$xml->METADATA->{'METADATA-SYSTEM'}->System->SystemDescription}";
+			if (isset($this->xml->METADATA->{'METADATA-SYSTEM'}->System->SystemDescription)) {
+				$system_description = "{$this->xml->METADATA->{'METADATA-SYSTEM'}->System->SystemDescription}";
 			}
 			$timezone_offset = "";
 		} else {
 			//@codeCoverageIgnoreStart
-			if (isset($xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemID)) {
-				$system_id = "{$xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemID}";
+			if (isset($this->xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemID)) {
+				$system_id = "{$this->xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemID}";
 			}
-			if (isset($xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemDescription)) {
-				$system_description = "{$xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemDescription}";
+			if (isset($this->xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemDescription)) {
+				$system_description = "{$this->xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->SystemDescription}";
 			}
-			if (isset($xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->TimeZoneOffset)) {
-				$timezone_offset = "{$xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->TimeZoneOffset}";
+			if (isset($this->xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->TimeZoneOffset)) {
+				$timezone_offset = "{$this->xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->attributes()->TimeZoneOffset}";
 			}
-			//@codeCoverageIgnoreEnd
 		}
 
-		if (isset($xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->Comments)) {
-			$system_comments = "{$xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->Comments}";
+		if (isset($this->xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->Comments)) {
+			$system_comments = "{$this->xml->METADATA->{'METADATA-SYSTEM'}->SYSTEM->Comments}";
 		}
+			//@codeCoverageIgnoreEnd
 
 		return array(
 				'SystemID' => $system_id,
@@ -1556,19 +1329,7 @@ class phRETS {
 	 * Logs out current RETS Session
 	 */
 	public function Disconnect () {
-		
-
-		if (empty($this->service_urls['Logout'])) {
-			$this->fail("Disconnect() called but unable to find Logout location.  Failed login?");
-			return false;
-		}
-
-		// make request
-		$result = $this->RETSRequest($this->service_urls['Logout']);
-		if (!$result) {
-			return false;
-		}
-
+		$this->RETSRequest($this->service_urls['Logout']);
 		// close cURL connection
 		curl_close($this->curl_handle);
 
@@ -1580,7 +1341,7 @@ class phRETS {
 		if (file_exists($this->cookie_file)) {
 			@unlink($this->cookie_file);
 		}
-
+		$this->is_connected = false;
 		return true;
 
 	}
@@ -1596,20 +1357,27 @@ class phRETS {
 	}
 
 	/**
-	 * Parse the XML response
+	 * Parse the XML response and set it to phRETS::$xml
 	 * @param string $data raw XML data
-	 * @return object SimpleXMLElement 
+	 * @return null 
 	 */
 	public function ParseXMLResponse( $data ) {
-		// parse XML function.  
+		if (empty($data)) {
+			throw new retsXMLParsingException('Error parsing empty string. No Data.');			
+		}
 		$xml = @simplexml_load_string($data);
 		if ( !is_object($xml) ) {
 			throw new retsXMLParsingException('Error parsing string into XML. Data: ' . $data);			
-		}
+		} 
 		if (0 != $xml['ReplyCode'] ) {
 			throw new retsException($xml['ReplyText'], (int) $xml['ReplyCode']);
 		}
-		return $xml;
+		$this->save_last_request();
+		$this->xml = $xml;
+	}
+	private function save_last_request () {
+		$this->last_request['ReplyCode'] = "{$this->xml['ReplyCode']}";
+		$this->last_request['ReplyText'] = "{$this->xml['ReplyText']}";
 	}
 
 	/**
@@ -1626,8 +1394,7 @@ class phRETS {
 		$this->last_response_headers_raw =	$this->last_remembered_header = "";
 
 		if (empty($request_service_url)) {
-			$this->fail("RETSRequest called but Action passed has no value.  Failed login?");
-			return false;
+			throw new phRETSException('RETSRequest called but Action passed has no value.  Failed login?');
 		}
 
 		$parse_results = parse_url($request_service_url, PHP_URL_HOST);
@@ -1687,10 +1454,6 @@ class phRETS {
 			fwrite($this->debug_file_handle, $this->last_response_body ."\n");
 		}
 
-		if ($this->catch_last_response == true) {
-			$this->last_server_response = $this->last_response_headers_raw . $this->last_response_body;
-		}
-
 		if (isset($this->last_response_headers['WWW-Authenticate'])) {
 			if (strpos($this->last_response_headers['WWW-Authenticate'], 'Basic') !== false) {
 				$this->auth_support_basic = true;
@@ -1713,8 +1476,6 @@ class phRETS {
 				$this->session_id = $matches[1];
 			}
 		}
-		// return raw headers and body
-		return array($this->last_response_headers_raw, $this->last_response_body);
 	}
 
 
@@ -1751,23 +1512,28 @@ class phRETS {
 
 	/**
 	 * encapsulates rets server version polymorphisms 
-	 * @param string $check_version 1_5_or_below or 1_7_or_higher
+	 * @param string $check_version 1_5_or_below or 1_7_or_above
 	 * @return boolean
 	 */
 	public function is_server_version($check_version) {
 		if ($check_version == "1_5_or_below") {
 			if ($this->GetServerVersion() == "RETS/1.5" || $this->GetServerVersion() == "RETS/1.0") {
 				return true;
-			}
-			else {
+			} else {
 				return false;
 			}
 		}
-		if ($check_version == "1_7_or_higher") {
-			if ($this->GetServerVersion() == "RETS/1.7" || $this->GetServerVersion() == "RETS/1.7.1" || $this->GetServerVersion() == "RETS/1.7.2" || $this->GetServerVersion() == "RETS/1.8") {
+		if ($check_version == "1_7_or_above") {
+			if ($this->GetServerVersion() == "RETS/1.7" || $this->GetServerVersion() == "RETS/1.7.1" || $this ->GetServerVersion() == "RETS/1.7.2" || $this->GetServerVersion() == "RETS/1.8") {
 				return true;
+			} else {
+				return false;
 			}
-			else {
+		}
+		if ($check_version == '1_0') {
+			if ( $this->GetServerVersion() == 'RETS/1.0') {
+				return true;
+			} else {
 				return false;
 			}
 		}
@@ -1800,6 +1566,7 @@ class phRETS {
 	 *	override_offset_protection
 	 * @param string $value
 	 * @return boolean true on success, false on failure
+	 * @todo refactor param
 	 */
 	public function SetParam($name, $value) {
 		switch ($name) {
@@ -1827,9 +1594,6 @@ class phRETS {
 				break;
 			case "use_interealty_ua_auth":
 				$this->use_interealty_ua_auth = $value;
-				break;
-			case "catch_last_response":
-				$this->catch_last_response = $value;
 				break;
 			case "disable_encoding_fix":
 				$this->disable_encoding_fix = $value;
