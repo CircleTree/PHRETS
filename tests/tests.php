@@ -7,7 +7,7 @@ class tests extends PHPUnit_Framework_TestCase {
 	function setUp() {
 		//Credentials should be in CSV format of url,password,username
 		error_reporting(E_ALL);
-		$fh = fopen('credentials.csv', 'r');
+		$fh = fopen(TEST_DIR.'/credentials.csv', 'r');
 		$login = fgetcsv($fh);
 		$this->url = $login[0];
 		$this->password = $login[1];
@@ -163,6 +163,7 @@ class tests extends PHPUnit_Framework_TestCase {
 		$multiple_ids = $sysid.','.$search[1]['sysid'];
 		$properties = $this->instance->GetObject('property', 'photo', $multiple_ids);
 	}
+	
 	function  testGetAllLookupValues() {
 		$this->assertTrue(is_array($this->instance->GetAllLookupValues('property')));
 	}
@@ -193,8 +194,7 @@ class tests extends PHPUnit_Framework_TestCase {
 		$this->assertTrue($this->instance->Disconnect());
 	}
 	function testNotConnected() {
+		$this->instance->Disconnect();
 		$this->assertFalse($this->instance->is_connected());
 	}
 }
-
-?>

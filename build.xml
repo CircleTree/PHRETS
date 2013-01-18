@@ -1,0 +1,13 @@
+<project name="Project Hub" default="unit_tests">
+    <target name="unit_tests">
+    	<echo msg="Running unit tests"/>
+	    <phpunit haltonfailure="true" haltonerror="true" bootstrap="tests/bootstrap.php">
+	  		<formatter type="plain" usefile="false"/>
+	  		<batchtest>
+			    <fileset dir="tests">
+					<include name="tests.php"/>
+			    </fileset>
+	  		</batchtest>
+		</phpunit>
+    </target>
+</project>
