@@ -106,11 +106,7 @@ class phRETS {
 	public function is_connected() {
 		return $this->is_connected;
 	}
-	/**
-	 * connect to the remote server, and log in 
-	 */
 	public function __construct($login_url, $username, $password, $ua_pwd = "") {
-	
 		$this->username = $username;
 		$this->password = $password;
 		
@@ -122,7 +118,18 @@ class phRETS {
 		$this->server_protocol = $url_parts['scheme'];
 	
 		$this->service_urls['Login'] = $url_parts['path'];
-
+		if (! empty($ua_pwd) ) {
+			// force use of RETS 1.7 User-Agent Authentication
+			$this->ua_auth = true;
+			$this->ua_pwd = $ua_pwd;
+		}
+	}
+	/**
+	 * connect to the remote server, and log in 
+	 */
+	public function Connect() {
+		if ( $this->is_connected() )
+			return;
 		
 		if (empty($this->static_headers['RETS-Version'])) {
 			$this->AddHeader("RETS-Version", "RETS/1.5");
@@ -138,13 +145,6 @@ class phRETS {
 		if (isset($url_parts['query']) && ! empty($url_parts['query']) ) {
 			$this->service_urls['Login'] .= "?{$url_parts['query']}";
 		}
-		if (! empty($ua_pwd) ) {
-			// force use of RETS 1.7 User-Agent Authentication
-			$this->ua_auth = true;
-			$this->ua_pwd = $ua_pwd;
-		}
-	
-	
 	
 		if (empty($this->cookie_file)) {
 			$this->cookie_file = tempnam("", "phrets");
@@ -159,7 +159,7 @@ class phRETS {
 		$this->initialize_curl();
 		// make request to Login transaction
 		
-		$this->RETSRequest($this->service_urls['Login']);
+		$this->RETSRequest('Login');
 		$this->ParseXMLResponse($this->last_response_body);
 		$this->save_last_request();
 		
@@ -208,6 +208,7 @@ class phRETS {
 		
 		// if 'Action' capability URL is provided, we MUST request it following the successful Login
 		if (isset($this->service_urls['Action']) && !empty($this->service_urls['Action'])) {
+			$this->is_connected = true;
 			$this->RETSRequest($this->service_urls['Action']);
 		}
 		
@@ -435,7 +436,7 @@ class phRETS {
 		}
 		// make request
 		$location_int = $location ? 1 : 0; 
-		$result = $this->RETSRequest($this->service_urls['GetObject'],
+		$result = $this->RETSRequest('GetObject',
 						array(
 								'Resource' => $resource,
 								'Type' => $type,
@@ -800,7 +801,7 @@ class phRETS {
 			}
 
 			// make request
-			$this->RETSRequest($this->service_urls['Search'], $search_arguments);
+			$this->RETSRequest('Search', $search_arguments);
 			$body = $this->fix_encoding($this->last_response_body);
 
 			$this->ParseXMLResponse($body);
@@ -879,7 +880,7 @@ class phRETS {
  */
 	public function GetAllLookupValues($resource) {
 
-		$this->RETSRequest($this->service_urls['GetMetadata'],
+		$this->RETSRequest( 'GetMetadata',
 						array(
 								'Type' => 'METADATA-LOOKUP_TYPE',
 								'ID' => $resource.':*',
@@ -888,7 +889,7 @@ class phRETS {
 						);
 
 		$this->ParseXMLResponse($this->last_response_body);
-
+		
 		$this_table = array();
 
 		if ($this->xml->METADATA && $this->xml->METADATA->{'METADATA-LOOKUP_TYPE'}) {
@@ -938,7 +939,7 @@ class phRETS {
  * @param string $lookupname metadata LookupName
  */
 	public function GetLookupValues($resource, $lookupname) {
-		$this->RETSRequest($this->service_urls['GetMetadata'],
+		$this->RETSRequest('GetMetadata',
 						array(
 								'Type' => 'METADATA-LOOKUP_TYPE',
 								'ID' => $resource.':'.$lookupname,
@@ -946,7 +947,7 @@ class phRETS {
 								)
 						);
 		$this->ParseXMLResponse($this->last_response_body);
-
+		
 		$this_table = array();
 		// parse XML into a nice array
 		if ($this->xml->METADATA && $this->xml->METADATA->{'METADATA-LOOKUP_TYPE'}) {
@@ -990,7 +991,7 @@ class phRETS {
 	public function GetMetadataResources($id = 0) {
 		
 		// make request
-		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
+		$result = $this->RETSRequest('GetMetadata',
 						array(
 								'Type' => 'METADATA-RESOURCE',
 								'ID' => $id,
@@ -1057,7 +1058,7 @@ class phRETS {
 	public function GetMetadataTable($resource, $class) {
 		$id = $resource.':'.$class;
 		// request specific metadata
-		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
+		$result = $this->RETSRequest('GetMetadata',
 						array(
 								'Type' => 'METADATA-TABLE',
 								'ID' => $id,
@@ -1119,7 +1120,7 @@ class phRETS {
  	*/
 	public function GetMetadataObjects($resource) {
 		
-		$result = $this->RETSRequest($this->service_urls['GetMetadata'],
+		$result = $this->RETSRequest('GetMetadata',
 						array(
 								'Type' => 'METADATA-OBJECT',
 								'ID' => $resource,
@@ -1160,7 +1161,7 @@ class phRETS {
 	 */
 	public function GetMetadataClasses($id) {
 		// request basic metadata information
-		$this->RETSRequest($this->service_urls['GetMetadata'],
+		$this->RETSRequest('GetMetadata',
 						array(
 								'Type' => 'METADATA-CLASS',
 								'ID' => $id,
@@ -1205,7 +1206,7 @@ class phRETS {
 	 * request basic metadata information
 	 */		
 	public function GetMetadataTypes($id = 0) {
-		$this->RETSRequest($this->service_urls['GetMetadata'],
+		$this->RETSRequest('GetMetadata',
 						array(
 								'Type' => 'METADATA-CLASS',
 								'ID' => $id,
@@ -1276,7 +1277,7 @@ class phRETS {
 	 */
 	public function GetServerInformation() {
 		
-		$this->RETSRequest($this->service_urls['GetMetadata'],
+		$this->RETSRequest('GetMetadata',
 						array(
 								'Type' => 'METADATA-SYSTEM',
 								'ID' => 0,
@@ -1329,7 +1330,7 @@ class phRETS {
 	 * Logs out current RETS Session
 	 */
 	public function Disconnect () {
-		$this->RETSRequest($this->service_urls['Logout']);
+		$this->RETSRequest('Logout');
 		// close cURL connection
 		curl_close($this->curl_handle);
 
@@ -1382,20 +1383,24 @@ class phRETS {
 
 	/**
 	 * Low Level RETS transaction implementation
-	 * @param string $service_url use the public phRETS->service_urls array for the URL
+	 * @param string $service_url action index from $service_urls array
 	 * @param array $parameters RETS transaction
 	 * @return array array($this->last_response_headers_raw, $response_body);
 	 */
-	public function RETSRequest($request_service_url, $parameters = "") {
+	public function RETSRequest($action_index, $parameters = "") {
+		if (! $this->is_connected() && ! 'Login' == $action_index ) 
+			$this->connect();
+		
+		if (! isset($this->service_urls[ $action_index ]) || empty($this->service_urls[ $action_index ])) {
+			throw new phRETSException('RETSRequest called but Action passed has no value.  Failed login?');
+		}
+		
+		$request_service_url = $this->service_urls[ $action_index ];
 		
 		//Reset per-request class variables
-		
 		$this->last_response_headers = array();
 		$this->last_response_headers_raw =	$this->last_remembered_header = "";
 
-		if (empty($request_service_url)) {
-			throw new phRETSException('RETSRequest called but Action passed has no value.  Failed login?');
-		}
 
 		$parse_results = parse_url($request_service_url, PHP_URL_HOST);
 		if (empty($parse_results)) {
