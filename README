@@ -1,0 +1,3 @@
+For testing this class, make a credentials.csv file in the /tests directory
+The contents should be:
+	url,username,password

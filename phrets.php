@@ -109,7 +109,7 @@ class phRETS {
 	public function __construct($login_url, $username, $password, $ua_pwd = "") {
 		$this->username = $username;
 		$this->password = $password;
-		
+		$this->login_url = $login_url;
 	
 		// chop up Login URL to use for later requests
 		$url_parts = parse_url($login_url);
@@ -797,7 +797,10 @@ class phRETS {
 				// which is considered excessive.  stopping the process in order to prevent
 				// abuse against the server.  almost ALWAYS happens when the user thinks Offset
 				// is supported by the server when it's actually NOT supported
-				throw phRETSException("Last SearchQuery() has resulted in 300+ requests to the server.  Stopping to prevent abuse");
+				throw phRETSException(
+			        "Last SearchQuery() has resulted in 300+ requests to the server.
+			        Stopping to prevent abuse"
+		        );
 			}
 
 			// make request
@@ -805,8 +808,6 @@ class phRETS {
 			$body = $this->fix_encoding($this->last_response_body);
 
 			$this->ParseXMLResponse($body);
-			$this->save_last_request();
-			// log replycode and replytext for reference later
 			
 
 			if (isset($this->xml->DELIMITER)) {
